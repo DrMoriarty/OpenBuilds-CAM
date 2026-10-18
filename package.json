@@ -1,0 +1,80 @@
+{
+  "name": "openbuilds-cam",
+  "productName": "OpenBuilds CAM",
+  "version": "1.0.0",
+  "description": "OpenBuilds CAM — browser CAM tool that converts DXF/SVG/bitmap/Gerber to G-Code, packaged as a desktop app with Electron",
+  "license": "AGPL-3.0",
+  "main": "electron/main.js",
+  "author": "OpenBuilds",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux",
+    "check": "node --check electron/main.js"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "com.openbuilds.cam",
+    "productName": "OpenBuilds CAM",
+    "asar": true,
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "electron/**",
+      "index.html",
+      "mobile.html",
+      "css/**",
+      "fonts/**",
+      "images/**",
+      "js/**",
+      "lib/**",
+      "workers/**",
+      "workspace/**",
+      "CNAME",
+      "favicon.ico",
+      "manifest.json",
+      "site.webmanifest",
+      "browserconfig.xml",
+      "*.png"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "OpenBuildsCAM-Setup-${version}.${ext}"
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": ["x64", "arm64"]
+        }
+      ],
+      "category": "public.app-category.graphics-design",
+      "icon": "build/icon.png"
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Graphics",
+      "icon": "build/icon.png",
+      "artifactName": "OpenBuildsCAM-${version}-${arch}.${ext}"
+    }
+  }
+}
