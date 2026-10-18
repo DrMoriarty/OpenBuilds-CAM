@@ -220,6 +220,16 @@ if (typeof window == "undefined") { // Only run as worker
         var leadInPaths = workerGetInflatePath(newClipperPaths, config.leadinval);
         //console.log(leadInPaths)
       }
+      // Order the paths so the head makes the shortest possible rapid moves
+      // between them (instead of the arbitrary/size-based Clipper order).
+      // Lead-in paths are reordered with the same permutation to stay index-matched.
+      orderPathsToMinimiseRapids(inflatedPaths, {
+        X: 0,
+        Y: 0
+      }, {
+        allClosedPolygons: true,
+        parallel: (typeof leadInPaths != "undefined" && leadInPaths) ? [leadInPaths] : []
+      });
       for (i = config.zstart + config.zstep; i < config.zdepth + config.zstep; i += config.zstep) {
         if (i > config.zdepth) {
           var zval = -config.zdepth;
@@ -258,6 +268,13 @@ if (typeof window == "undefined") { // Only run as worker
       // end config.union = "Yes"
     } else { // begin config.union="No"
       var newClipperPaths = clipperPaths;
+      // Visit the entities in an order that minimises rapid travel between them
+      // (instead of the arbitrary/size-based order they were added in)
+      var travelCursor = {
+        X: 0,
+        Y: 0
+      };
+      orderPathsToMinimiseRapids(newClipperPaths, travelCursor);
       for (j = 0; j < newClipperPaths.length; j++) {
         if (config.offset != 0) {
           var inflatedPaths = workerGetInflatePath([newClipperPaths[j]], config.offset);
@@ -286,6 +303,20 @@ if (typeof window == "undefined") { // Only run as worker
         if (config.leadinval != 0) {
           var leadInPaths = workerGetInflatePath([newClipperPaths[j]], config.leadinval);
           //console.log(leadInPaths[0][0])
+        }
+        // Order the paths of this entity (and its matching lead-in paths) to
+        // minimise rapid travel between them, starting where the previous
+        // entity's last path ends
+        orderPathsToMinimiseRapids(inflatedPaths, travelCursor, {
+          allClosedPolygons: config.offset != 0,
+          parallel: (typeof leadInPaths != "undefined" && leadInPaths && leadInPaths.length == inflatedPaths.length) ? [leadInPaths] : []
+        });
+        if (inflatedPaths.length > 0) {
+          var lastPath = inflatedPaths[inflatedPaths.length - 1];
+          if (lastPath && lastPath.length > 0) {
+            travelCursor.X = lastPath[lastPath.length - 1].X;
+            travelCursor.Y = lastPath[lastPath.length - 1].Y;
+          }
         }
         for (i = config.zstart + config.zstep; i < config.zdepth + config.zstep; i += config.zstep) {
           if (i > config.zdepth) {
@@ -858,6 +889,150 @@ if (typeof window == "undefined") { // Only run as worker
     r.push(pt[1] + (distance * Math.sin(ang * Math.PI / 180)));
     return r;
   };
+
+  // -----------------------------------------------------------------------------------------------
+  // Rapid-travel minimisation (greedy nearest-neighbour ordering of paths)
+  // -----------------------------------------------------------------------------------------------
+
+  // circular rotation of an array (worker-local version of Array.prototype.rotateRight)
+  function rotateArrayRight(arr, n) {
+    var clone = arr.slice(0);
+    clone.unshift.apply(clone, clone.splice(n, clone.length));
+    return clone;
+  }
+
+  function distSqXY(ax, ay, bx, by) {
+    var dx = ax - bx;
+    var dy = ay - by;
+    return dx * dx + dy * dy;
+  }
+
+  function isExplicitlyClosedPath(p) {
+    // paths built from closed source geometry repeat their first vertex at the end
+    return p.length > 2 && p[0].X === p[p.length - 1].X && p[0].Y === p[p.length - 1].Y;
+  }
+
+  // Rotate the vertices of a closed path so that it starts at the vertex closest
+  // to (x, y). Paths following the Clipper convention (closed polygons which do
+  // not repeat their first vertex at the end) may only be rotated when
+  // assumeClosedPolygon is true, else geometry would be corrupted.
+  function rotatePathStartCloserTo(p, x, y, assumeClosedPolygon) {
+    if (!p || p.length < 3) return p;
+    var explicitlyClosed = isExplicitlyClosedPath(p);
+    if (!explicitlyClosed && !assumeClosedPolygon) return p;
+    var count = explicitlyClosed ? p.length - 1 : p.length;
+    // on very large polygons, sampling every vertex is overkill - stride instead
+    var stride = Math.max(1, Math.floor(count / 128));
+    var best = 0;
+    var bestD = Infinity;
+    for (var i = 0; i < count; i += stride) {
+      var d = distSqXY(p[i].X, p[i].Y, x, y);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    if (best === 0) return p;
+    var body = explicitlyClosed ? p.slice(0, p.length - 1) : p.slice(0);
+    var rotated = rotateArrayRight(body, best);
+    if (explicitlyClosed) rotated.push(rotated[0]);
+    return rotated;
+  }
+
+  // Greedy nearest-neighbour: repeatedly pick the path whose (rotatable) start
+  // is closest to the current head position, starting from startPos (the machine
+  // origin / position where the job begins). Reorders `paths` in place. Any
+  // arrays in opts.parallel (e.g. matching lead-in paths) are reordered with
+  // the exact same permutation so index-matched arrays stay in sync.
+  // opts.allClosedPolygons: true when every path is a closed Clipper polygon
+  // (offsetter output) - allows entry-point rotation on all of them.
+  function orderPathsToMinimiseRapids(paths, startPos, opts) {
+    if (!paths || paths.length < 2) return paths;
+    opts = opts || {};
+    var allClosed = !!opts.allClosedPolygons;
+    var parallel = opts.parallel || [];
+    var n = paths.length;
+    var remaining = [];
+    for (var i = 0; i < n; i++) remaining.push(i);
+    var newPaths = [];
+    var newParallel = [];
+    for (var pa = 0; pa < parallel.length; pa++) newParallel.push([]);
+    var curX = startPos.X;
+    var curY = startPos.Y;
+    while (remaining.length > 0) {
+      var bestK = -1;
+      var bestD = Infinity;
+      for (var k = 0; k < remaining.length; k++) {
+        var p = paths[remaining[k]];
+        if (!p || p.length === 0) continue;
+        var d = distSqXY(p[0].X, p[0].Y, curX, curY);
+        if (p.length > 2 && (allClosed || isExplicitlyClosedPath(p))) {
+          // a closed path can be entered at any of its vertices
+          var count = isExplicitlyClosedPath(p) ? p.length - 1 : p.length;
+          var stride = Math.max(1, Math.floor(count / 128));
+          for (var v = 0; v < count; v += stride) {
+            var dv = distSqXY(p[v].X, p[v].Y, curX, curY);
+            if (dv < d) d = dv;
+          }
+        }
+        if (d < bestD) {
+          bestD = d;
+          bestK = k;
+        }
+      }
+      if (bestK === -1) bestK = 0; // only empty paths left - preserve their order
+      var idx = remaining.splice(bestK, 1)[0];
+      var p = paths[idx];
+      if (p && p.length > 2) {
+        p = rotatePathStartCloserTo(p, curX, curY, allClosed);
+        paths[idx] = p;
+      }
+      newPaths.push(p);
+      for (var pa2 = 0; pa2 < parallel.length; pa2++) {
+        if (parallel[pa2] && parallel[pa2].length === n) {
+          newParallel[pa2].push(parallel[pa2][idx]);
+        }
+      }
+      if (p && p.length > 0) {
+        curX = p[p.length - 1].X;
+        curY = p[p.length - 1].Y;
+      }
+    }
+    for (var i2 = 0; i2 < n; i2++) paths[i2] = newPaths[i2];
+    for (var pa3 = 0; pa3 < parallel.length; pa3++) {
+      if (parallel[pa3] && parallel[pa3].length === n) {
+        for (var i3 = 0; i3 < n; i3++) parallel[pa3][i3] = newParallel[pa3][i3];
+      }
+    }
+    return paths;
+  }
+
+  // Same greedy nearest-neighbour strategy, but for a plain list of points
+  // ({x, y} objects, e.g. drill centres). Reorders the array in place.
+  function orderPointsToMinimiseRapids(points, startPos) {
+    if (!points || points.length < 2) return points;
+    var remaining = points.slice(0);
+    var ordered = [];
+    var curX = startPos.X;
+    var curY = startPos.Y;
+    while (remaining.length > 0) {
+      var bestK = 0;
+      var bestD = Infinity;
+      for (var k = 0; k < remaining.length; k++) {
+        var d = distSqXY(remaining[k].x, remaining[k].y, curX, curY);
+        if (d < bestD) {
+          bestD = d;
+          bestK = k;
+        }
+      }
+      var pt = remaining.splice(bestK, 1)[0];
+      ordered.push(pt);
+      curX = pt.x;
+      curY = pt.y;
+    }
+    for (var i = 0; i < points.length; i++) points[i] = ordered[i];
+    return points;
+  }
 
   // borrowed code from https://github.com/chilipeppr/widget-eagle/blob/master/widget.js
 
@@ -1976,6 +2151,8 @@ if (typeof window == "undefined") { // Only run as worker
     // console.log(geometry, geometry2)
     var circle = new THREE.Line(geometry2, material);
 
+    var drillPoints = []; // {x, y, nodes: []} - collected first, ordered for minimal rapid travel, then added to drillPath
+
     config.toolpath.traverse(function(child) {
       // console.log('Traverse: ', child)
       if (child.name == "inflatedGroup") {
@@ -2044,16 +2221,31 @@ if (typeof window == "undefined") { // Only run as worker
             new THREE.Vector3(center.x, center.y, 0),
           );
           var line = new THREE.Line(geometry, material);
-          drillPath.add(line)
+          drillEntity.add(line)
           lastz = zval
         }
-        drillPath.add(drillEntity);
+        drillPoints.push({
+          x: center.x,
+          y: center.y,
+          nodes: [drillEntity]
+        });
       } else if (child.type == "Points") {
         child.visible = false;
       } else {
         // console.log("type of ", child.type, " being skipped");
       }
     });
+    // Visit the drill points in an order that minimises rapid travel between
+    // them (instead of the order they appear in the document)
+    orderPointsToMinimiseRapids(drillPoints, {
+      X: 0,
+      Y: 0
+    });
+    for (var d = 0; d < drillPoints.length; d++) {
+      for (var dn = 0; dn < drillPoints[d].nodes.length; dn++) {
+        drillPath.add(drillPoints[d].nodes[dn]);
+      }
+    }
     drillPath.userData.pretty = prettyGrp
     return drillPath;
   }

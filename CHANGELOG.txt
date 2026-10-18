@@ -1,3 +1,4 @@
+Added ordering of toolpath objects by minimal rapid travel (greedy nearest-neighbour with start-point rotation for closed paths) in toolpath calculation
 09 Dec 2024:  Added Pen Plotter Servo Pen Move Time Parameter
 02 Dec 2024:  Added Pen Plotter Hello World
 25 Nov 2024:  Added ACRO A1 profile and Scribe toolhead
