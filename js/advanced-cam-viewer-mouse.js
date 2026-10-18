@@ -15,13 +15,13 @@ function mouseSelectMode() {
   var isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
   if (!isMac) {
     if (controls.enableRotate) {
-      helpoverlay.innerHTML = "<kbd>Left Mouse</kbd> = Select / <kbd>Middle Mouse</kbd> = Orbit / <kbd>Right Mouse</kbd> = Pan / <kbd>Wheel</kbd> = Zoom / <kbd>Ctrl</kbd> = Multiple Select / <kbd>Del</kbd> = Delete Selected"
+      helpoverlay.innerHTML = "<kbd>Left Mouse</kbd> = Select / <kbd>Alt+Left Mouse Drag</kbd> or <kbd>Middle Mouse</kbd> = Orbit / <kbd>Right Mouse</kbd> = Pan / <kbd>Wheel</kbd> = Zoom / <kbd>Ctrl</kbd> = Multiple Select / <kbd>Del</kbd> = Delete Selected"
     } else {
-      helpoverlay.innerHTML = "<kbd>Left Mouse</kbd> = Select / <kbd>Right Mouse</kbd> = Pan / <kbd>Wheel</kbd> = Zoom / <kbd>Ctrl</kbd> = Multiple Select / <kbd>Del</kbd> = Delete Selected"
+      helpoverlay.innerHTML = "<kbd>Left Mouse</kbd> = Select / <kbd>Alt+Left Mouse Drag</kbd> = Orbit / <kbd>Right Mouse</kbd> = Pan / <kbd>Wheel</kbd> = Zoom / <kbd>Ctrl</kbd> = Multiple Select / <kbd>Del</kbd> = Delete Selected"
     }
   } else {
     if (controls.enableRotate) {
-      helpoverlay.innerHTML = "<kbd>Left Mouse</kbd> = Select / <kbd>Middle Mouse</kbd> = Orbit / <kbd>Right Mouse</kbd> = Pan / <kbd>Wheel</kbd> = Zoom / <kbd>Ctrl</kbd> = Multiple Select / <kbd>Del</kbd> = Delete Selected"
+      helpoverlay.innerHTML = "<kbd>Left Mouse</kbd> = Select / <kbd>Alt+Left Mouse Drag</kbd> or <kbd>Middle Mouse</kbd> = Orbit / <kbd>Right Mouse</kbd> = Pan / <kbd>Wheel</kbd> = Zoom / <kbd>Ctrl</kbd> = Multiple Select / <kbd>Del</kbd> = Delete Selected"
     } else {
       helpoverlay.innerHTML = "<kbd>Ctrl</kbd> = Multiple Select / <kbd>Del</kbd> = Delete Selected"
     }

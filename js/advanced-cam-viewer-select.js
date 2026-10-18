@@ -67,6 +67,11 @@ function mouseDown(event) {
   if (mouseState == "select") {
     // helpoverlay.style.visibility = "visible";
     if (event.which == 1) { // only on left mousedown
+      if (event.altKey) {
+        // Alt + Left Mouse = orbit the workspace (handled by OrbitControls).
+        // Do not start a selection / marquee in this case.
+        return;
+      }
       var pos = {};
       // mousedown = true;
       mousedowncoords = {};
@@ -108,7 +113,7 @@ function mouseDown(event) {
               obj = intersection.object;
             if (obj.name && obj.name != "bullseye" && obj.name != "XY" && obj.name != "GridHelper" && obj.userData.type != "toolpath") {
               // printLog('Clicked on : ' + obj.name, successcolor, "viewer")
-              if (!event.ctrlKey && !event.altKey) {
+              if (!event.ctrlKey) {
                 for (i = 0; i < objectsInScene.length; i++) {
                   var object = objectsInScene[i]
                   object.traverse(function(child) {
@@ -129,7 +134,7 @@ function mouseDown(event) {
           } else { // if nothing intersected we clicked empty space and clear the selection if ctrl is not down
             // Deselecting only if not ctrl.
             // console.log(e.ctrlKey)
-            if (!event.ctrlKey && !event.altKey) {
+            if (!event.ctrlKey) {
               for (i = 0; i < objectsInScene.length; i++) {
                 var obj = objectsInScene[i]
                 obj.traverse(function(child) {
@@ -260,7 +265,7 @@ function mouseMove(event) {
   // make sure we are in a select mode.
   // helpoverlay.style.visibility = "visible";
   if (mouseIsDown) { // only on left mousedown
-    if (mouseState == "select") {
+    if (mouseState == "select" && !event.altKey) { // Alt + drag = orbit, never marquee-select
       // lets wait for mouse to move at least a few pixels, just to eliminate false "selections" if user is simply clicking on an object (hysteresys)
       if (delta(event.clientX, mousedowncoords.x) > 10 && delta(event.clientX, mousedowncoords.x) > 10 || delta(event.clientX, mousedowncoords.x) < -10 && delta(event.clientX, mousedowncoords.x) < -10) {
         offset = $('#renderArea').offset();
@@ -317,7 +322,7 @@ function mouseMove(event) {
         // convert to threejs position
         worldendcoords = mouseToWorldCoord(event)
         // clear selection in case marquee is shrinking
-        if (!event.ctrlKey && !event.altKey) {
+        if (!event.ctrlKey) {
           for (i = 0; i < objectsInScene.length; i++) {
             var obj = objectsInScene[i]
             obj.traverse(function(child) {
@@ -338,7 +343,7 @@ function mouseMove(event) {
               center.x = child.geometry.boundingSphere.center.x + (child.parent.position.x) + (child.position.x)
               center.y = child.geometry.boundingSphere.center.y + (child.parent.position.y) + (child.position.y)
               if (XinSelectRange(center.x) && YinSelectRange(center.y)) {
-                if (event.ctrlKey || event.altKey) {
+                if (event.ctrlKey) {
                   child.userData.selected = !child.userData.lastSelected;
                 } else {
                   child.userData.selected = true;

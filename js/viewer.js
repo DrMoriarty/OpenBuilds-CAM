@@ -308,18 +308,28 @@ function init3D() {
 
   controls = new THREE.OrbitControls(camera, renderer.domElement);
   controls.target.set(0, 0, 0); // view direction perpendicular to XY-plane
-  var isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
-  if (!isMac) {
-    controls.mouseButtons = {
-      ORBIT: THREE.MOUSE.MIDDLE,
-      ZOOM: false,
-      PAN: THREE.MOUSE.RIGHT
-    };
-  }
+  // Left Mouse is reserved for selection/marquee - it must never orbit.
+  // Orbiting is done with Middle Mouse, and with Alt + Left Mouse drag (see below).
+  controls.mouseButtons = {
+    ORBIT: THREE.MOUSE.MIDDLE,
+    ZOOM: false,
+    PAN: THREE.MOUSE.RIGHT
+  };
   controls.enableRotate = true;
   controls.enableZoom = true; // optional
   controls.maxDistance = 8000; // limit max zoom out
   controls.enableKeys = false; // Disable Keyboard on canvas
+
+  // Alt + Left Mouse drag = Orbit.
+  // While Alt is held we re-map the OrbitControls ORBIT button to the left mouse
+  // button. The capture-phase listener on window is guaranteed to run before
+  // OrbitControls' own (bubble-phase) mousedown handler on the canvas, so the
+  // remapping is already in place when OrbitControls decides what to do.
+  window.addEventListener('mousedown', function(e) {
+    if (e.button === 0) {
+      controls.mouseButtons.ORBIT = e.altKey ? THREE.MOUSE.LEFT : THREE.MOUSE.MIDDLE;
+    }
+  }, true);
 
 
   drawWorkspace();
