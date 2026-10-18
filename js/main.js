@@ -336,7 +336,7 @@ function saveFile() {
 
 function saveFileGcode(filename) {
   if (!filename.endsWith('.gcode')) {
-    filename = filename += '.obc'
+    filename = filename += '.gcode'
   }
   var textToWrite = prepgcodefile();
   var blob = new Blob([textToWrite], {
@@ -376,6 +376,11 @@ function previewFile() {
 }
 
 /**
+ * Saves a Blob to disk. Prefers the File System Access API (showSaveFilePicker),
+ * which opens the native OS "Save As" dialog letting the user pick folder and
+ * filename. Falls back to a plain download (goes to the Downloads folder) on
+ * browsers/devices without the API.
+ *
  * @param {Blob} file - File or Blob object. This parameter is required.
  * @param {string} fileName - Optional file name e.g. "image.png"
  */
@@ -404,6 +409,41 @@ function invokeSaveAsDialog(file, fileName) {
     return navigator.msSaveBlob(file, fileFullName);
   }
 
+  if (window.showSaveFilePicker) {
+    saveViaSystemDialog(file, fileFullName, fileExtension).catch(function(err) {
+      if (err && err.name === 'AbortError') {
+        // User cancelled the native dialog - do nothing
+        return;
+      }
+      console.warn('System save dialog unavailable/failed, falling back to download:', err);
+      saveViaDownloadLink(file, fileFullName);
+    });
+    return;
+  }
+
+  saveViaDownloadLink(file, fileFullName);
+}
+
+// Native OS "Save As" dialog via the File System Access API
+async function saveViaSystemDialog(file, fileFullName, fileExtension) {
+  var ext = '.' + (fileExtension || 'txt').replace(/^\./, '');
+  var handle = await window.showSaveFilePicker({
+    suggestedName: fileFullName,
+    types: [{
+      description: fileFullName.split('.').pop().toUpperCase() + ' file',
+      accept: {
+        'text/plain': [ext]
+      }
+    }]
+  });
+  var writable = await handle.createWritable();
+  await writable.write(file);
+  await writable.close();
+  printLog('Saved to ' + handle.name, successcolor, "file");
+}
+
+// Legacy fallback: plain browser download (lands in the Downloads folder)
+function saveViaDownloadLink(file, fileFullName) {
   var hyperlink = document.createElement('a');
   hyperlink.href = URL.createObjectURL(file);
   // hyperlink.target = '_blank';

@@ -1,3 +1,4 @@
+Save Project (.obc), Save G-Code and Settings backup now open the native OS "Save As" dialog (File System Access API) instead of silently downloading to the Downloads folder; falls back to download on browsers without the API; fixed G-Code export appending .obc instead of .gcode to filenames missing an extension
 Added Electron desktop packaging (Windows NSIS / macOS DMG / Linux AppImage): electron/main.js serves the app via a custom app:// protocol so Web Workers and workspace .obc loading keep working; Google Analytics is blocked in the desktop build
 Tabs now placed by arc-length along the whole toolpath (including around corners), so tabs also land on curved contours (circles, arcs, splines) instead of only on straight segments
 Added ordering of toolpath objects by minimal rapid travel (greedy nearest-neighbour with start-point rotation for closed paths) in toolpath calculation
