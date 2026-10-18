@@ -71,11 +71,17 @@
         }
       ],
       "category": "public.app-category.graphics-design",
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "artifactName": "OpenBuildsCAM-${version}-${arch}.${ext}"
     },
     "linux": {
       "target": [
-        "AppImage"
+        {
+          "target": "tar.gz",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "category": "Graphics",
       "icon": "build/icon.png",

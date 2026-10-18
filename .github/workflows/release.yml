@@ -1,0 +1,142 @@
+name: Release
+
+# Запуск: вручную (workflow_dispatch) или автоматически по тегу вида v1.2.3.
+# Собирает: DMG (macOS x64 + arm64), zip с NSIS setup exe (Windows x64),
+# tar.gz (Linux x86_64) и публикует GitHub Release с CHANGELOG.
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (dmg x64 + arm64)
+            os: macos-latest
+            script: dist:mac
+            artifact: mac-dmg
+            paths: 'dist/*.dmg'
+          - name: Windows (setup exe in zip)
+            os: windows-latest
+            script: dist:win
+            artifact: win-setup-zip
+            paths: 'dist/*.zip'
+          - name: Linux (tar.gz x86_64)
+            os: ubuntu-latest
+            script: dist:linux
+            artifact: linux-targz
+            paths: 'dist/*.tar.gz'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # Версия: из тега (без префикса v) при пуше тега, иначе из package.json.
+      - name: Determine version
+        id: ver
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="$(node -p "require('./package.json').version")"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version: $VERSION"
+
+      # Проставляем версию из тега в package.json, чтобы имена артефактов
+      # (электон-билдер включает ${version} в имена файлов) совпадали с тегом.
+      - name: Sync package.json version with tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.version = process.env.VERSION;
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run ${{ matrix.script }}
+
+      # Windows: упаковываем setup exe в zip.
+      - name: Zip Windows setup
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          Compress-Archive -Path dist/OpenBuildsCAM-Setup-*.exe `
+            -DestinationPath "dist/OpenBuildsCAM-Setup-$env:VERSION-win-x64.zip" -Force
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.paths }}
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine version
+        id: ver
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="$(node -p "require('./package.json').version")"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      # CHANGELOG.txt — плоский список (новые записи сверху, без разбивки по
+      # версиям), поэтому в тело релиза идёт верхушка файла, а полный файл
+      # прикладывается как ассет.
+      - name: Prepare release notes
+        shell: bash
+        run: |
+          {
+            echo "## Changelog"
+            echo
+            head -n 15 CHANGELOG.txt
+            echo
+            echo "Полный список изменений — в приложенном файле CHANGELOG.txt."
+          } > release-notes.md
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.ver.outputs.version }}
+          name: OpenBuilds CAM v${{ steps.ver.outputs.version }}
+          body_path: release-notes.md
+          files: |
+            artifacts/*
+            CHANGELOG.txt
+          fail_on_unmatched_files: true
