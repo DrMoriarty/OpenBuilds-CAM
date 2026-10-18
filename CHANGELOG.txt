@@ -1,3 +1,4 @@
+Tabs now placed by arc-length along the whole toolpath (including around corners), so tabs also land on curved contours (circles, arcs, splines) instead of only on straight segments
 Added ordering of toolpath objects by minimal rapid travel (greedy nearest-neighbour with start-point rotation for closed paths) in toolpath calculation
 09 Dec 2024:  Added Pen Plotter Servo Pen Move Time Parameter
 02 Dec 2024:  Added Pen Plotter Hello World

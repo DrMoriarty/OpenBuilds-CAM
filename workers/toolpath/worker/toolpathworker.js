@@ -430,6 +430,173 @@ if (typeof window == "undefined") { // Only run as worker
     return clipperPaths
   }
 
+  // -----------------------------------------------------------------------------------------------
+  // Tabs on curved paths
+  // -----------------------------------------------------------------------------------------------
+  // Tabs used to be placed only on single polyline segments long enough to hold one
+  // (d >= toolDia + tabwidth). Curved paths (circles, arcs, splines) are approximated by many
+  // short segments after Clipper offsetting, so they never qualified and got no tabs at all.
+  // Instead, the whole path (including its closing segment) is now treated as one arc-length
+  // line, and tabs are placed at even arc-length intervals along it, following the polyline.
+
+  // Returns a sorted list of [startDist, endDist] intervals (arc length along the path) where
+  // tabs should be raised. A tab may cross the start/end junction of a closed path; in that
+  // case it is split into a wrapping pair of intervals.
+  calcTabIntervals = function(totalLen, tabspace, tabwidth, toolDia) {
+    var tabLen = tabwidth + Math.abs(toolDia || 0); // a tab spans the tab itself + tool engagement
+    if (!(totalLen > 0) || !(tabspace > 0) || !(tabwidth > 0) || !(tabLen > 0)) {
+      return [];
+    }
+    var numTabs = Math.round(totalLen / (tabspace + tabLen));
+    if (numTabs < 1) {
+      return []; // path too short for even one tab
+    }
+    var spacePerTab = totalLen / numTabs;
+    // center each tab inside its space
+    var pad = (spacePerTab - tabLen) / 2;
+    if (pad < 0) pad = 0; // tabs wider than their spacing: place them back to back
+    var intervals = [];
+    for (var k = 0; k < numTabs; k++) {
+      var start = k * spacePerTab + pad;
+      var end = start + tabLen;
+      if (start >= totalLen) break;
+      if (end > totalLen) { // tab crosses the path start/end junction: wrap it around
+        intervals.push([start, totalLen]);
+        intervals.push([0, end - totalLen]);
+      } else {
+        intervals.push([start, end]);
+      }
+    }
+    intervals.sort(function(a, b) {
+      return a[0] - b[0];
+    });
+    return intervals;
+  };
+
+  // Walks a polyline (closing back to its first point when closed) and pushes vertices into
+  // opts.lineUnionGeo, raising z to opts.zTab inside the tab intervals and back down to
+  // opts.zCut outside them. Points are interpolated at every tab entry/exit, so tabs follow
+  // curved paths. Also appends the walked 2D projection to opts.clipperArr (when given) and
+  // each tab's own polyline to opts.tabsOut (when given, used for the 3D tab preview).
+  emitPathVerticesWithTabs = function(opts) {
+    var points = opts.points;
+    var closed = !!opts.closed;
+    var n = points.length;
+    if (n < 2) return;
+    var segCount = closed ? n : n - 1;
+
+    // cumulative arc length at each segment boundary
+    var cum = [0];
+    for (var s = 0; s < segCount; s++) {
+      cum.push(cum[s] + distanceFormula(points[s].X, points[(s + 1) % n].X, points[s].Y, points[(s + 1) % n].Y));
+    }
+
+    // are tabs active on this pass? (only on passes deeper than the tab depth)
+    var intervals = [];
+    if (opts.tabwidth > 0 && opts.tabspace > 0 && opts.zTab && opts.zCut < opts.zTab) {
+      intervals = calcTabIntervals(cum[segCount], opts.tabspace, opts.tabwidth, opts.toolDia);
+    }
+
+    // z-change events along the path: [distance, z]
+    var events = [];
+    for (var t = 0; t < intervals.length; t++) {
+      events.push([intervals[t][0], opts.zTab]);
+      events.push([intervals[t][1], opts.zCut]);
+    }
+    events.sort(function(a, b) {
+      // at equal distances process tab exits (lower z) before tab entries (raise z),
+      // so back-to-back tabs don't produce a spurious dip
+      return (a[0] - b[0]) || (a[1] - b[1]);
+    });
+
+    // interpolated point at arc length dstr (linear along the polyline, so it follows the curve)
+    var pointAt = function(dstr) {
+      var idx = 0;
+      while (idx < segCount - 1 && cum[idx + 1] < dstr) idx++;
+      var a = points[idx];
+      var b = points[(idx + 1) % n];
+      var segLen = cum[idx + 1] - cum[idx];
+      var f = segLen > 0 ? (dstr - cum[idx]) / segLen : 0;
+      return {
+        X: a.X + (b.X - a.X) * f,
+        Y: a.Y + (b.Y - a.Y) * f
+      };
+    };
+
+    var curZ = opts.zCut;
+    var currentTab = null;
+
+    var pushAt = function(pt, z) {
+      opts.lineUnionGeo.vertices.push(new THREE.Vector3(pt.X, pt.Y, z));
+      if (opts.clipperArr) opts.clipperArr.push({
+        X: pt.X,
+        Y: pt.Y
+      });
+    };
+
+    var pushPt = function(pt) {
+      pushAt(pt, curZ);
+      if (currentTab) currentTab.push({
+        X: pt.X,
+        Y: pt.Y
+      });
+    };
+
+    // raise/lower z at an interpolated point: emit the point at the current z
+    // first, then at the new z, so the move to it stays at depth and the z
+    // change is a true vertical plunge/rise at that XY
+    var setZ = function(z, pt) {
+      if (z == opts.zTab) { // entering a tab: cut to pt at depth, then rise
+        pushPt(pt); // at cut depth
+        curZ = z;
+        currentTab = [];
+        pushPt(pt); // raised, starts the tab polyline
+      } else { // leaving a tab: continue the tab top to pt, then drop
+        if (!currentTab) currentTab = [];
+        pushPt(pt); // still raised, finishes the tab polyline
+        curZ = z;
+        if (opts.tabsOut) opts.tabsOut.push(currentTab);
+        currentTab = null;
+        pushAt(pt, curZ); // back down to cut depth
+      }
+    };
+
+    // does the path start inside a (wrapped) tab?
+    for (var t2 = 0; t2 < intervals.length; t2++) {
+      if (intervals[t2][0] <= 0 && 0 < intervals[t2][1]) {
+        curZ = opts.zTab;
+        currentTab = [];
+        break;
+      }
+    }
+
+    // start point of the path
+    pushPt(points[0]);
+
+    var evIdx = 0;
+    for (var s2 = 0; s2 < segCount; s2++) {
+      var segStart = cum[s2];
+      var segEnd = cum[s2 + 1];
+      // events exactly at (or behind) this segment's start: change z without a new XY
+      while (evIdx < events.length && events[evIdx][0] <= segStart) {
+        if (events[evIdx][1] != curZ) setZ(events[evIdx][1], pointAt(events[evIdx][0]));
+        evIdx++;
+      }
+      // events inside this segment: interpolate a point at each z change
+      while (evIdx < events.length && events[evIdx][0] < segEnd) {
+        if (events[evIdx][1] != curZ) setZ(events[evIdx][1], pointAt(events[evIdx][0]));
+        evIdx++;
+      }
+      // the segment's own end vertex (keeps the original geometry points)
+      pushPt(points[(s2 + 1) % n]);
+    }
+
+    // a wrapped tab can still be open at the end of the walk: flush it
+    if (currentTab && currentTab.length > 1 && opts.tabsOut) {
+      opts.tabsOut.push(currentTab);
+    }
+  };
+
   drawClipperPaths = function(config) {
     if (config.leadInPaths) {
       if (config.leadInPaths.length != config.paths.length) {
@@ -462,90 +629,18 @@ if (typeof window == "undefined") { // Only run as worker
           lineUnionGeo.vertices.push(new THREE.Vector3(config.leadInPaths[i][0].X, config.leadInPaths[i][0].Y, z));
         }
       }
-      var totalDist = 0;
-      var lastTabPos = -config.tabspace;
-      var lastvert = {
-        x: 0,
-        y: 0,
-        z: 0
-      }
-      var lastTabPos = -config.tabspace;
-      for (var j = 0; j < config.paths[i].length; j++) {
-        // console.log(j)
-        totalDist += distanceFormula(lastvert.x, config.paths[i][j].X, lastvert.y, config.paths[i][j].Y)
-        if (totalDist > (lastTabPos + config.tabspace) && config.z < config.tabdepth) {
-          if (config.z < -config.tabdepth && j < config.paths[i].length - 1) {
-            // console.log(i, j)
-            var d = distanceFormula(config.paths[i][j].X, config.paths[i][j + 1].X, config.paths[i][j].Y, config.paths[i][j + 1].Y)
-            if (d >= (config.toolDia + config.tabwidth)) {
-              var numTabs = Math.round(d / (config.tabspace + config.tabwidth));
-              // if we have a line distance of 100
-              // and 3 tabs (width 10) in that line per numTabs
-              // then we want to evenly space them
-              // so we divide the line distance by numTabs
-              var spacePerTab = d / numTabs;
-              // which in this example would be 33.33~
-              // then in each space per tab we need to center the tab
-              // which means dividing the difference of the spacePerTab and tabWidth by 2
-              var tabPaddingPerSpace = (spacePerTab - (config.tabwidth + config.toolDia)) / 2;
-
-              // console.log("Adding tab")
-              // next point
-              var deltaX = config.paths[i][j + 1].X - config.paths[i][j].X;
-              var deltaY = config.paths[i][j + 1].Y - config.paths[i][j].Y;
-
-              // get the line angle
-              var ang = Math.atan2(deltaY, deltaX);
-              // console.log('  ANGLE ' + (ang * 180 / Math.PI));
-
-              // convert it to degrees for later math with addDegree
-              ang = ang * 180 / Math.PI;
-
-              lastTabPos = totalDist;
-              var npt = [config.paths[i][j].X, config.paths[i][j].Y]
-              for (var r = 0; r < numTabs; r++) {
-                // then for each tab
-                // add another point at the current point +tabPaddingPerSpace
-                npt = newPointFromDistanceAndAngle(npt, ang, tabPaddingPerSpace);
-                // g += 'G1' + feedrate + ' X' + npt[0] + ' Y' + npt[1] + '\n';
-                lineUnionGeo.vertices.push(new THREE.Vector3(npt[0], npt[1], config.z));
-                // then we raise the z height by config.tabHeight
-                lineUnionGeo.vertices.push(new THREE.Vector3(npt[0], npt[1], config.tabdepth));
-                // g += 'G0 Z' + tabsBelowZ + '\n';
-                // then add another point at the current point +tabWidth
-                npt = newPointFromDistanceAndAngle(npt, ang, config.tabwidth + config.toolDia);
-                lineUnionGeo.vertices.push(new THREE.Vector3(npt[0], npt[1], config.tabdepth));
-                // g += 'G0' + feedrate + ' X' + npt[0] + ' Y' + npt[1] + '\n';
-                // then lower the z height back to zPos at plunge speed
-                // g += 'G0 F' + plungeSpeed + ' Z' + tabsBelowZ + '\n';
-                // g += 'G1 F' + plungeSpeed + ' Z' + zpos + '\n';
-                lineUnionGeo.vertices.push(new THREE.Vector3(npt[0], npt[1], config.z));
-                // then add another point at the current point +tabPaddingPerSpace
-                // with the cut speed
-                npt = newPointFromDistanceAndAngle(npt, ang, tabPaddingPerSpace);
-                lineUnionGeo.vertices.push(new THREE.Vector3(npt[0], npt[1], config.z));
-                // g += 'G1' + feedrate + ' X' + npt[0] + ' Y' + npt[1] + '\n';
-              }
-            } else {
-              lineUnionGeo.vertices.push(new THREE.Vector3(config.paths[i][j].X, config.paths[i][j].Y, config.z));
-            }
-          } else {
-            lineUnionGeo.vertices.push(new THREE.Vector3(config.paths[i][j].X, config.paths[i][j].Y, config.vz));
-          }
-        } else {
-          lineUnionGeo.vertices.push(new THREE.Vector3(config.paths[i][j].X, config.paths[i][j].Y, config.z));
-        }
-        // lineUnionGeo.vertices.push(new THREE.Vector3(paths[i][j].X, paths[i][j].Y, z));
-        lastvert = {
-          x: config.paths[i][j].X,
-          y: config.paths[i][j].Y,
-          z: config.z
-        }
-      }
-      // close it by connecting last point to 1st point - if its not an open ended vector
-      if (config.paths[i].length > 2) {
-        lineUnionGeo.vertices.push(new THREE.Vector3(config.paths[i][0].X, config.paths[i][0].Y, config.z));
-      }
+      // emit the path, raising z inside tabs placed by arc-length along the whole
+      // path, so tabs also land on curved contours (circles, arcs, splines...)
+      emitPathVerticesWithTabs({
+        points: config.paths[i],
+        closed: config.paths[i].length > 2, // not an open ended vector
+        zCut: config.z,
+        zTab: config.tabdepth,
+        tabspace: config.tabspace,
+        tabwidth: config.tabwidth,
+        toolDia: config.toolDia,
+        lineUnionGeo: lineUnionGeo
+      });
       if (config.leadInPaths) {
         if (leadInPaths.length == paths.length) {
           lineUnionGeo.vertices.push(new THREE.Vector3(config.leadInPaths[i][0].X, config.leadInPaths[i][0].Y, config.z));
@@ -592,7 +687,6 @@ if (typeof window == "undefined") { // Only run as worker
     var clipperTabsPaths = [];
     for (var i = 0; i < config.paths.length; i++) {
       var clipperArr = [];
-      var clipperTabsArr = [];
       var lineUnionGeo = new THREE.Geometry();
       if (config.leadInPaths) { // 2021-03-16 This is where the lead-in starts. Added sorting of leadInPaths array to find closest vector to start of Main Vector
 
@@ -612,169 +706,20 @@ if (typeof window == "undefined") { // Only run as worker
           });
         }
       }
-      var totalDist = 0;
-      var lastTabPos = -config.tabspace;
-      var lastvert = {
-        x: 0,
-        y: 0,
-        z: 0
-      }
-      var lastTabPos = -config.tabspace;
-      for (var j = 0; j < config.paths[i].length; j++) {
-        // console.log(j)
-        totalDist += distanceFormula(lastvert.x, config.paths[i][j].X, lastvert.y, config.paths[i][j].Y)
-        if (config.tabwidth) {
-          if (totalDist > (lastTabPos + config.tabspace) && config.z < config.tabdepth) {
-            if (j < config.paths[i].length) {
-              // console.log(i, j)
-              if (j < config.paths[i].length - 1) {
-                var d = distanceFormula(config.paths[i][j].X, config.paths[i][j + 1].X, config.paths[i][j].Y, config.paths[i][j + 1].Y)
-              } else {
-                var d = distanceFormula(config.paths[i][j].X, config.paths[i][0].X, config.paths[i][j].Y, config.paths[i][0].Y)
-              }
-              if (d >= (config.toolDia + config.tabwidth)) {
-                console.log('long enough')
-                var numTabs = Math.round(d / (config.tabspace + config.tabwidth));
-                // if we have a line distance of 100
-                // and 3 tabs (width 10) in that line per numTabs
-                // then we want to evenly space them
-                // so we divide the line distance by numTabs
-                var spacePerTab = d / numTabs;
-                // which in this example would be 33.33~
-                // then in each space per tab we need to center the tab
-                // which means dividing the difference of the spacePerTab and tabWidth by 2
-                var tabPaddingPerSpace = (spacePerTab - (config.tabwidth + config.toolDia)) / 2;
-
-                // console.log("Adding tab")
-                // next point
-                if (j < config.paths[i].length - 1) {
-                  var deltaX = config.paths[i][j + 1].X - config.paths[i][j].X;
-                  var deltaY = config.paths[i][j + 1].Y - config.paths[i][j].Y;
-                } else {
-                  var deltaX = config.paths[i][0].X - config.paths[i][j].X;
-                  var deltaY = config.paths[i][0].Y - config.paths[i][j].Y;
-                }
-
-                // get the line angle
-                var ang = Math.atan2(deltaY, deltaX);
-                // console.log('  ANGLE ' + (ang * 180 / Math.PI));
-
-                // convert it to degrees for later math with addDegree
-                ang = ang * 180 / Math.PI;
-
-                lastTabPos = totalDist;
-                var npt = [config.paths[i][j].X, config.paths[i][j].Y]
-                lineUnionGeo.vertices.push(new THREE.Vector3(npt[0], npt[1], config.z));
-                clipperArr.push({
-                  X: npt[0],
-                  Y: npt[1]
-                });
-                for (var r = 0; r < numTabs; r++) {
-                  var clipperTabsArr = [];
-                  // then for each tab
-                  // add another point at the current point +tabPaddingPerSpace
-                  npt = newPointFromDistanceAndAngle(npt, ang, tabPaddingPerSpace);
-                  // g += 'G1' + feedrate + ' X' + npt[0] + ' Y' + npt[1] + '\n';
-                  lineUnionGeo.vertices.push(new THREE.Vector3(npt[0], npt[1], config.z));
-                  clipperArr.push({
-                    X: npt[0],
-                    Y: npt[1]
-                  });
-                  clipperTabsArr.push({
-                    X: npt[0],
-                    Y: npt[1]
-                  });
-                  // then we raise the z height by config.tabHeight
-                  lineUnionGeo.vertices.push(new THREE.Vector3(npt[0], npt[1], config.tabdepth));
-                  clipperArr.push({
-                    X: npt[0],
-                    Y: npt[1]
-                  });
-                  clipperTabsArr.push({
-                    X: npt[0],
-                    Y: npt[1]
-                  });
-                  // g += 'G0 Z' + tabsBelowZ + '\n';
-                  // then add another point at the current point +tabWidth
-                  npt = newPointFromDistanceAndAngle(npt, ang, config.tabwidth + config.toolDia);
-                  lineUnionGeo.vertices.push(new THREE.Vector3(npt[0], npt[1], config.tabdepth));
-                  clipperArr.push({
-                    X: npt[0],
-                    Y: npt[1]
-                  });
-                  clipperTabsArr.push({
-                    X: npt[0],
-                    Y: npt[1]
-                  });
-                  // g += 'G0' + feedrate + ' X' + npt[0] + ' Y' + npt[1] + '\n';
-                  // then lower the z height back to zPos at plunge speed
-                  // g += 'G0 F' + plungeSpeed + ' Z' + tabsBelowZ + '\n';
-                  // g += 'G1 F' + plungeSpeed + ' Z' + zpos + '\n';
-                  lineUnionGeo.vertices.push(new THREE.Vector3(npt[0], npt[1], config.z));
-                  clipperArr.push({
-                    X: npt[0],
-                    Y: npt[1]
-                  });
-                  clipperTabsArr.push({
-                    X: npt[0],
-                    Y: npt[1]
-                  });
-                  // then add another point at the current point +tabPaddingPerSpace
-                  // with the cut speed
-                  npt = newPointFromDistanceAndAngle(npt, ang, tabPaddingPerSpace);
-                  lineUnionGeo.vertices.push(new THREE.Vector3(npt[0], npt[1], config.z));
-                  clipperArr.push({
-                    X: npt[0],
-                    Y: npt[1]
-                  });
-                  clipperTabsPaths.push(clipperTabsArr);
-                  // g += 'G1' + feedrate + ' X' + npt[0] + ' Y' + npt[1] + '\n';
-                }
-              } else { // line isnt long enough
-                lineUnionGeo.vertices.push(new THREE.Vector3(config.paths[i][j].X, config.paths[i][j].Y, config.z));
-                clipperArr.push({
-                  X: config.paths[i][j].X,
-                  Y: config.paths[i][j].Y
-                });
-              }
-            } else { // is last point
-              lineUnionGeo.vertices.push(new THREE.Vector3(config.paths[i][j].X, config.paths[i][j].Y, config.z));
-              clipperArr.push({
-                X: config.paths[i][j].X,
-                Y: config.paths[i][j].Y
-              });
-            }
-          } else { // havent moved far enough yet
-            lineUnionGeo.vertices.push(new THREE.Vector3(config.paths[i][j].X, config.paths[i][j].Y, config.z));
-            clipperArr.push({
-              X: config.paths[i][j].X,
-              Y: config.paths[i][j].Y
-            });
-          }
-        } else { // no valid config.tabwidth found
-          lineUnionGeo.vertices.push(new THREE.Vector3(config.paths[i][j].X, config.paths[i][j].Y, config.z));
-          clipperArr.push({
-            X: config.paths[i][j].X,
-            Y: config.paths[i][j].Y
-          });
-        }
-        // lineUnionGeo.vertices.push(new THREE.Vector3(paths[i][j].X, paths[i][j].Y, z));
-        lastvert = {
-          x: config.paths[i][j].X,
-          y: config.paths[i][j].Y,
-          z: config.z
-        }
-      } // end for loop j < paths[i].length
-      // close it by connecting last point to 1st point
-
-      // Handle open ended single line here by not adding point
-      if (config.paths[i].length > 2) {
-        lineUnionGeo.vertices.push(new THREE.Vector3(config.paths[i][0].X, config.paths[i][0].Y, config.z));
-        clipperArr.push({
-          X: config.paths[i][0].X,
-          Y: config.paths[i][0].Y
-        });
-      }
+      // emit the path, raising z inside tabs placed by arc-length along the whole
+      // path, so tabs also land on curved contours (circles, arcs, splines...)
+      emitPathVerticesWithTabs({
+        points: config.paths[i],
+        closed: config.paths[i].length > 2, // not an open ended vector
+        zCut: config.z,
+        zTab: config.tabdepth,
+        tabspace: config.tabspace,
+        tabwidth: config.tabwidth,
+        toolDia: config.toolDia,
+        lineUnionGeo: lineUnionGeo,
+        clipperArr: clipperArr,
+        tabsOut: clipperTabsPaths
+      });
 
       // if (config.leadInPaths) {
       //   if (config.leadInPaths.length == config.paths.length) {
@@ -793,7 +738,6 @@ if (typeof window == "undefined") { // Only run as worker
       //console.log(lineUnionGeo)
       group.add(lineUnion);
       clipperPaths.push(clipperArr);
-      clipperTabsPaths.push(clipperTabsArr);
 
     } // end for loop i < paths.length
 
