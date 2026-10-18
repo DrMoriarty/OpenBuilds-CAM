@@ -62,23 +62,75 @@ function addText() {
 
 // FONTS
 
-// Fetch GoogleFonts List
-// $.get('https://www.googleapis.com/webfonts/v1/webfonts?key=AIzaSyB6CfNzjx-T-iGR4-1ECG1bmZ0eNU-4cTU', function (result) {
-//   console.log(result)
-// });
+// Locally bundled fonts (see lib/fonts/ and css/fonts.css).
+// The app makes no external requests: vector outlines for the Text tool are
+// generated from these TTF files via opentype.js.
+// Keep this list in sync with the fonts array in lib/jquery/fontselect/jquery.fontselect.js
+var localFonts = [{
+    family: "Bowlby One SC",
+    file: "lib/fonts/BowlbyOneSC-Regular.ttf"
+  }, {
+    family: "Anton",
+    file: "lib/fonts/Anton-Regular.ttf"
+  }, {
+    family: "Arvo",
+    file: "lib/fonts/Arvo-Regular.ttf"
+  }, {
+    family: "Bangers",
+    file: "lib/fonts/Bangers-Regular.ttf"
+  }, {
+    family: "Bevan",
+    file: "lib/fonts/Bevan-Regular.ttf"
+  }, {
+    family: "Dancing Script",
+    file: "lib/fonts/DancingScript.ttf"
+  }, {
+    family: "Lato",
+    file: "lib/fonts/Lato-Regular.ttf"
+  }, {
+    family: "Lobster",
+    file: "lib/fonts/Lobster-Regular.ttf"
+  }, {
+    family: "Merriweather",
+    file: "lib/fonts/Merriweather-Regular.ttf"
+  }, {
+    family: "Open Sans",
+    file: "lib/fonts/OpenSans-Regular.ttf"
+  }, {
+    family: "Orbitron",
+    file: "lib/fonts/Orbitron.ttf"
+  }, {
+    family: "Oswald",
+    file: "lib/fonts/Oswald.ttf"
+  }, {
+    family: "Pacifico",
+    file: "lib/fonts/Pacifico-Regular.ttf"
+  }, {
+    family: "Permanent Marker",
+    file: "lib/fonts/PermanentMarker-Regular.ttf"
+  }, {
+    family: "Playfair Display",
+    file: "lib/fonts/PlayfairDisplay.ttf"
+  }, {
+    family: "Raleway",
+    file: "lib/fonts/Raleway.ttf"
+  }, {
+    family: "Special Elite",
+    file: "lib/fonts/SpecialElite-Regular.ttf"
+  }, {
+    family: "Ubuntu",
+    file: "lib/fonts/Ubuntu-Regular.ttf"
+  }, {
+    family: "VT323",
+    file: "lib/fonts/VT323-Regular.ttf"
+  }];
 
 // from https://github.com/nraynaud/webgcode/blob/66e2662fcb72219024976610a6c66d307af84882/webapp/cnc/cam/text.js
 var getFont = function(url) {
-  if (url.match('^http://')) {
-    url = url.replace("http://", "//")
-  }
-  if (url.match('^https://')) {
-    url = url.replace("https://", "//")
-  }
   return new RSVP.Promise(function(resolve, reject) {
     opentype.load(url, function(err, font) {
       if (err)
-        reject();
+        reject(err);
       else
         resolve(font);
     });
@@ -86,20 +138,15 @@ var getFont = function(url) {
 };
 
 function getFontList() {
-  return new RSVP.Promise(
-    function(resolve, reject) {
-      $.get('https://www.googleapis.com/webfonts/v1/webfonts?key=AIzaSyCx9m5LJdE0eljjfS-6UMymK2uoeqhFzuo', function(result) {
-        resolve(result.items);
-      });
-    });
+  return new RSVP.Promise(function(resolve, reject) {
+    resolve(localFonts);
+  });
 }
 
 function getTextFromData(fontData, fontVariant, text, fontSize, x, y) {
-  if (fontVariant == null)
-    fontVariant = 'regular';
   x = x == null ? 0 : x;
   y = y == null ? 0 : y;
-  return getTextFromFile(fontData.files[fontVariant], text, fontSize, x, y);
+  return getTextFromFile(fontData.file, text, fontSize, x, y);
 }
 
 function getTextFromFile(file, text, fontSize, offsetX, offsetY) {
@@ -140,21 +187,16 @@ function searchFontInList(fontList, fontFamily) {
 
 function getText(fontFamily, fontVariant, text, fontSize) {
   return new Promise(function(resolve, reject) {
-    /*stuff using username, password*/
     return getFontList().then(function(fontList) {
       return getTextFromData(searchFontInList(fontList, fontFamily), fontVariant, text, fontSize);
     }).then(function(data) {
-      // console.log(data)
       resolve(data);
-    })
+    }, function(err) {
+      console.error('Font not found locally: ' + fontFamily, err);
+      reject(err);
+    });
   });
 }
-
-// function getText(fontFamily, fontVariant, text, fontSize) {
-//   return getFontList().then(function(fontList) {
-//     return getTextFromData(searchFontInList(fontList, fontFamily), fontVariant, text, fontSize);
-//   })
-// }
 
 $(document).ready(function() {
   var modal = `

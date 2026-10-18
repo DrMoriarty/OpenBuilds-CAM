@@ -1,0 +1,159 @@
+/*
+ * Locally bundled webfonts (no external requests).
+ * Source: Google Fonts (https://fonts.google.com), licensed under the
+ * SIL Open Font License / Ubuntu Font Licence — see lib/fonts/LICENSE.txt.
+ * Font files live in lib/fonts/ and are also used by the Text tool
+ * (js/basic-cad-text.js) via opentype.js to generate vector outlines.
+ */
+
+@font-face {
+	font-family: 'Bowlby One SC';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('../lib/fonts/BowlbyOneSC-Regular.ttf') format('truetype');
+}
+
+@font-face {
+	font-family: 'Anton';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('../lib/fonts/Anton-Regular.ttf') format('truetype');
+}
+
+@font-face {
+	font-family: 'Arvo';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('../lib/fonts/Arvo-Regular.ttf') format('truetype');
+}
+
+@font-face {
+	font-family: 'Bangers';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('../lib/fonts/Bangers-Regular.ttf') format('truetype');
+}
+
+@font-face {
+	font-family: 'Bevan';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('../lib/fonts/Bevan-Regular.ttf') format('truetype');
+}
+
+@font-face {
+	font-family: 'Dancing Script';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('../lib/fonts/DancingScript.ttf') format('truetype');
+}
+
+@font-face {
+	font-family: 'Lato';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('../lib/fonts/Lato-Regular.ttf') format('truetype');
+}
+
+@font-face {
+	font-family: 'Lobster';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('../lib/fonts/Lobster-Regular.ttf') format('truetype');
+}
+
+@font-face {
+	font-family: 'Merriweather';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('../lib/fonts/Merriweather-Regular.ttf') format('truetype');
+}
+
+@font-face {
+	font-family: 'Open Sans';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('../lib/fonts/OpenSans-Regular.ttf') format('truetype');
+}
+
+@font-face {
+	font-family: 'Orbitron';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('../lib/fonts/Orbitron.ttf') format('truetype');
+}
+
+@font-face {
+	font-family: 'Oswald';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('../lib/fonts/Oswald.ttf') format('truetype');
+}
+
+@font-face {
+	font-family: 'Pacifico';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('../lib/fonts/Pacifico-Regular.ttf') format('truetype');
+}
+
+@font-face {
+	font-family: 'Permanent Marker';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('../lib/fonts/PermanentMarker-Regular.ttf') format('truetype');
+}
+
+@font-face {
+	font-family: 'Playfair Display';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('../lib/fonts/PlayfairDisplay.ttf') format('truetype');
+}
+
+@font-face {
+	font-family: 'Raleway';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('../lib/fonts/Raleway.ttf') format('truetype');
+}
+
+@font-face {
+	font-family: 'Special Elite';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('../lib/fonts/SpecialElite-Regular.ttf') format('truetype');
+}
+
+@font-face {
+	font-family: 'Ubuntu';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('../lib/fonts/Ubuntu-Regular.ttf') format('truetype');
+}
+
+@font-face {
+	font-family: 'VT323';
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url('../lib/fonts/VT323-Regular.ttf') format('truetype');
+}

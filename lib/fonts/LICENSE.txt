@@ -1,0 +1,30 @@
+Bundled fonts (lib/fonts/)
+
+These fonts are downloaded from Google Fonts (https://fonts.google.com) and
+bundled locally so the application makes no external network requests.
+
+All fonts are licensed under the SIL Open Font License 1.1
+(https://openfontlicense.org), except Ubuntu-Regular.ttf which is licensed
+under the Ubuntu Font Licence 1.0
+(https://assets.ubuntu.com/v1/cf5c4bbb-UbuntuFontLicensing.txt-2015-06-17.txt).
+
+Fonts:
+  Anton-Regular.ttf            (c) Vernon Adams, OFL 1.1
+  Arvo-Regular.ttf             (c) Anton Koovit, OFL 1.1
+  Bangers-Regular.ttf          (c) Vernon Adams, OFL 1.1
+  Bevan-Regular.ttf            (c) Vernon Adams, OFL 1.1
+  BowlbyOneSC-Regular.ttf      (c) Vernon Adams, OFL 1.1
+  DancingScript.ttf            (c) Impallari Type, OFL 1.1
+  Lato-Regular.ttf             (c) Lukasz Dziedzic, OFL 1.1
+  Lobster-Regular.ttf          (c) Impallari Type, OFL 1.1
+  Merriweather-Regular.ttf     (c) Sorkin Type Co, OFL 1.1
+  OpenSans-Regular.ttf         (c) Steve Matteson, OFL 1.1
+  Orbitron.ttf                 (c) Matt McInerney, OFL 1.1
+  Oswald.ttf                   (c) Vernon Adams, OFL 1.1
+  Pacifico-Regular.ttf         (c) Vernon Adams, OFL 1.1
+  PermanentMarker-Regular.ttf  (c) Font Diner, OFL 1.1
+  PlayfairDisplay.ttf          (c) Claus Eggers Sorensen, OFL 1.1
+  Raleway.ttf                  (c) Matt McInerney, OFL 1.1
+  SpecialElite-Regular.ttf     (c) Astigmatic, OFL 1.1
+  Ubuntu-Regular.ttf           Ubuntu Font Licence 1.0
+  VT323-Regular.ttf            (c) Peter Hull, OFL 1.1
