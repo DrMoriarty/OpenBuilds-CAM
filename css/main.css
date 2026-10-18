@@ -320,17 +320,15 @@ button:focus {
 
 #simoverlay {
   font-size: 12px;
-  margin-left: 20px;
-  margin-right: 20px;
   padding-left: 6px;
   text-align: left;
   position: absolute;
   bottom: 30px;
-  left: -20px;
+  left: 50px;
   /* background: rgba(240, 240, 240, 0.85);
   color: #444;
   border-radius: 4px; */
-  width: 100%;
+  width: auto;
   z-index: 1;
   text-shadow: rgba(0, 0, 0, .2) 0 0 1px;
   -webkit-font-smoothing: antialiased;
