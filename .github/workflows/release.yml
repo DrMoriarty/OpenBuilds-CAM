@@ -74,8 +74,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # --publish never: публикацией занимается шаг softprops/action-gh-release,
+      # а electron-builder при сборке по тегу иначе требует GH_TOKEN и падает.
       - name: Build
-        run: npm run ${{ matrix.script }}
+        run: npm run ${{ matrix.script }} -- --publish never
 
       # Windows: упаковываем setup exe в zip.
       - name: Zip Windows setup
