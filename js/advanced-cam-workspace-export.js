@@ -139,30 +139,9 @@ function storeRedo() {
 // Workspace Export Functions
 
 function exportWorkspace() {
-  Metro.dialog.create({
-    title: "Save Workspace (Export .OBC file)",
-    content: `<div class="form-group">
-           <label>Filename:</label>
-           <input type="text" id="workspaceFilename" placeholder="` + 'workspace-' + date.yyyymmdd() + '.obc' + `" value="` + 'workspace-' + date.yyyymmdd() + '.obc' + `"/>
-           <small class="text-muted">What would you like to name the workspace export?</small>
-       </div>
-    `,
-    actions: [{
-        caption: "<span class='fas fa-download fa-fw'></span> Save",
-        cls: "js-dialog-close primary",
-        onclick: function() {
-          saveExportWorkspace($('#workspaceFilename').val());
-        }
-      },
-      {
-        caption: "Cancel",
-        cls: "js-dialog-close",
-        onclick: function() {
-          //
-        }
-      }
-    ]
-  });
+  // No built-in filename prompt: go straight to the native OS "Save As"
+  // dialog (via invokeSaveAsDialog), where folder and filename can be chosen.
+  saveExportWorkspace('workspace-' + date.yyyymmdd() + '.obc');
 }
 
 function saveExportWorkspace(filename) {

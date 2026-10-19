@@ -276,32 +276,9 @@ function loadFile(f) {
 }
 
 function saveFile() {
-  Metro.dialog.create({
-    title: "Save GCODE",
-    clsDialog: "dark",
-    content: `<div class="form-group">
-           <label>Filename:</label>
-           <input type="text" id="gcodeFilename" contenteditable="true" placeholder="` + 'file-' + date.yyyymmdd() + '.gcode' + `" value="` + 'file-' + date.yyyymmdd() + '.gcode' + `"/>
-           <small class="text-muted">What would you like to name the gcode export?</small>
-       </div>
-    `,
-    actions: [{
-        caption: "<span class='fas fa-download fa-fw'></span> Save",
-        cls: "js-dialog-close primary",
-        onclick: function() {
-          saveFileGcode($('#gcodeFilename').val());
-        }
-      },
-      {
-        caption: "Cancel",
-        cls: "js-dialog-close",
-        onclick: function() {
-          //
-        }
-      }
-    ]
-  });
-
+  // No built-in filename prompt: go straight to the native OS "Save As"
+  // dialog (via invokeSaveAsDialog), where folder and filename can be chosen.
+  saveFileGcode('file-' + date.yyyymmdd() + '.gcode');
 }
 
 function saveFileGcode(filename) {
