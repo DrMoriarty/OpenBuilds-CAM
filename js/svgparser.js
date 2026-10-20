@@ -14,6 +14,67 @@ function loadFiles(files) {
   });
 }
 
+// CSS `transform-origin` support.
+// Some editors (e.g. Boxy SVG) store rotations as a `transform="matrix(...)"`
+// attribute plus a `style="transform-origin: X Y"` declaration. Per SVG2/CSS
+// the effective transform is translate(origin) * transform * translate(-origin),
+// i.e. the rotation happens around (X, Y). lw.svg-parser ignores
+// transform-origin and applies the raw matrix around (0,0), which scatters
+// sibling groups (each with its own origin) to different places.
+// Fix: pre-process the SVG text and fold every transform-origin into the
+// transform attribute as translate(ox,oy) ... translate(-ox,-oy), which
+// lw.svg-parser already knows how to compose.
+function svgCssLengthToUserUnits(value) {
+  var m = value.match(/^([+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)\s*([a-z%]*)$/i);
+  if (!m) return null;
+  // Convert physical units to px at 90dpi, matching lw.svg-parser's own
+  // unit normalisation; px and unit-less values are user units as-is.
+  var factors = {
+    '': 1, px: 1,
+    mm: 90 / 25.4, cm: 90 / 2.54, in: 90,
+    pt: 90 / 72, pc: 90 / 6, q: 90 / 25.4 / 4
+  };
+  var factor = factors[m[2].toLowerCase()];
+  if (factor === undefined) return null; // %, em, ... unsupported -> leave tag untouched
+  return parseFloat(m[1]) * factor;
+}
+
+function foldTransformOrigins(svgtext) {
+  return svgtext.replace(/<[a-zA-Z][^>]*>/g, function(tag) {
+    if (!/transform-origin/i.test(tag)) return tag;
+
+    // transform-origin may live in the style attribute or as a presentation attribute
+    var origin = null;
+    var styleMatch = tag.match(/\bstyle\s*=\s*("([^"]*)"|'([^']*)')/);
+    var styleVal = styleMatch ? (styleMatch[2] !== undefined ? styleMatch[2] : styleMatch[3]) : '';
+    var originMatch = styleVal.match(/transform-origin\s*:\s*([^;"']+)/i);
+    if (originMatch) {
+      origin = originMatch[1].trim();
+    } else {
+      var originAttr = tag.match(/(?:^|\s)transform-origin\s*=\s*("([^"]*)"|'([^']*)')/i);
+      if (originAttr) origin = (originAttr[2] !== undefined ? originAttr[2] : originAttr[3]).trim();
+    }
+    if (!origin) return tag;
+
+    var parts = origin.split(/[\s,]+/);
+    if (parts.length !== 2) return tag; // keywords / percentages not supported
+    var ox = svgCssLengthToUserUnits(parts[0]);
+    var oy = svgCssLengthToUserUnits(parts[1]);
+    if (ox === null || oy === null) return tag;
+
+    // Fold into the transform attribute: T(o) * transform * T(-o)
+    var transformMatch = tag.match(/(^|\s)transform\s*=\s*("([^"]*)"|'([^']*)')/);
+    if (!transformMatch) return tag;
+    var transform = transformMatch[3] !== undefined ? transformMatch[3] : transformMatch[4];
+    if (!transform || !transform.length) return tag;
+
+    var folded = 'translate(' + ox + ',' + oy + ') ' + transform +
+                 ' translate(' + (-ox) + ',' + (-oy) + ')';
+    return tag.slice(0, transformMatch.index) + transformMatch[1] +
+           'transform="' + folded + '"' + tag.slice(transformMatch.index + transformMatch[0].length);
+  });
+}
+
 // Load one file
 function loadSVGFile(file) {
   // Read the file as text so the document units can be detected:
@@ -37,6 +98,7 @@ function loadSVGFile(file) {
     }
     // Load SVG from file
     console.log(file)
+    svgtext = foldTransformOrigins(svgtext);
     lwsvgparser.loadFromString(svgtext).then(function(element) {
         return lwsvgparser.parse().then(function(tags) {
           drawFile(file.name, tags, false, forcedResol);
