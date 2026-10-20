@@ -48,7 +48,7 @@ function showScaleWindow(object) {
       <button type="button" class="button alert" onclick="scalewindow.style.visibility = 'hidden';" aria-label="Close">
         Cancel
       </button>
-      <button type="button" class="button success" aria-label="Close" onclick="scaleObj()">
+      <button type="button" class="button success" aria-label="Close" onclick="applyTransform()">
         Apply
       </button>
     </div>
