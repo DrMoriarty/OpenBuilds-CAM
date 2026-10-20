@@ -208,6 +208,8 @@ function showScaleWindow(object) {
 
 function applyTransform() {
   if (transformDirty.scale && transformDirty.position) {
+    // single undo snapshot covering both operations
+    storeUndo(true);
     // apply scale first, then position (moveObj recalculates bbox after scaling)
     scaleObj(true);
     moveObj(true);
@@ -255,8 +257,8 @@ function scaleObj(skipUndo) {
   clearSceneFlag = true;
 }
 
-function moveObj() {
-  storeUndo(true);
+function moveObj(skipUndo) {
+  if (!skipUndo) storeUndo(true);
   var object = objectToScale;
   var bbox2 = new THREE.Box3().setFromObject(object);
   var width = (bbox2.max.x - bbox2.min.x).toFixed(2);
