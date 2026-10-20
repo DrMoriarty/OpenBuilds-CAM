@@ -26,9 +26,15 @@ function listeners() {
 
 
 
+  // Update tree checkboxes/colors without rebuilding the tree,
+  // so the user's expanded/collapsed state is preserved.
+  function refreshTreeSelection() {
+    clearSceneFlag = true; // triggers animateTree() on next frame
+  };
+
   function selectAll_None(e) {
     objectsInScene.map(a => a.children.map(b=>b.userData.selected = e.data.On_Off))
-    fillTree();
+    refreshTreeSelection();
   };
 
   $('#selectAll').on('click', { On_Off: true}, selectAll_None); // Select All
@@ -38,7 +44,7 @@ function listeners() {
   // function drf_inverse
   $('#selectInv').on('click', function() {
     objectsInScene.map(a => a.children.map(b=>b.userData.selected = !b.userData.selected))
-    fillTree();
+    refreshTreeSelection();
   });
 
 
