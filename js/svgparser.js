@@ -60,6 +60,34 @@ function loadSVGFile(file) {
 //   fillTree();
 // }
 
+// Some editors (e.g. Boxy SVG) store object/group names as <title> child
+// elements instead of id/inkscape:label attributes. Return the tag's own
+// <title> (direct child only, so group titles don't leak from subgroups).
+function getSVGTagTitle(tag) {
+  var el = tag.element;
+  if (el && el.children) {
+    for (var i = 0; i < el.children.length; i++) {
+      var c = el.children[i];
+      if (c.nodeName && c.nodeName.toLowerCase() === 'title' && c.textContent) {
+        return c.textContent.trim();
+      }
+    }
+  }
+  return null;
+}
+
+// Walk up the tag tree to find the name of the group/layer this tag sits in:
+// inkscape:label or id attribute first, then the group's <title>.
+function getSVGLayerName(tag) {
+  for (var t = tag; t; t = t.parent) {
+    if (t.name === 'g') {
+      var label = t.attrs['inkscape:label'] || t.attrs.id || getSVGTagTitle(t);
+      if (label) return label;
+    }
+  }
+  return null;
+}
+
 function svgtraverse(tag, callback) {
 
   callback(tag);
@@ -104,6 +132,8 @@ function drawFile(name, tag, flip, forcedResol) {
   scale = 1 / (resol / 25.4)
   var svgtagobject = new THREE.Object3D();
   svgtagobject.name = name
+  var pathCount = 0
+  var layerCounts = {}
   svgtraverse(tag, function(child) {
     // console.log(child)
     if (child.paths.length && child.paths[0].length) {
@@ -115,16 +145,26 @@ function drawFile(name, tag, flip, forcedResol) {
       //   svgtagobject.add(shape);
       // });
 
-      var count = 0
       child.getPaths().forEach(function(path) {
-        count++;
         path = drawSVGLine(tag, path, scale, flip)
         // console.log(child)
         var layer = {
-          label: child.layer || "unnamed layer"
+          label: child.layer || getSVGLayerName(child) || "unnamed layer"
         }
         path.userData.layer = layer
-        path.name = child.attrs.id || "path" + count
+        // Prefer the object's own name (id attribute or <title> element).
+        // Without one, name it after its layer/group with a per-layer
+        // counter, so objects are distinguishable (e.g. "Mount-holes 1").
+        var name = child.attrs.id || getSVGTagTitle(child)
+        if (!name) {
+          if (layer.label !== "unnamed layer") {
+            layerCounts[layer.label] = (layerCounts[layer.label] || 0) + 1;
+            name = layer.label + " " + layerCounts[layer.label];
+          } else {
+            name = "path" + (++pathCount);
+          }
+        }
+        path.name = name
         // console.log(path)
         // console.log(path)
         svgtagobject.add(path);
