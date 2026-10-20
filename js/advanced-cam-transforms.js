@@ -120,7 +120,7 @@ function showScaleWindow(object) {
       <button type="button" class="button alert" onclick="scalewindow.style.visibility = 'hidden';" aria-label="Close">
         Cancel
       </button>
-      <button type="button" class="button success" aria-label="Close" onclick="moveObj()">
+      <button type="button" class="button success" aria-label="Close" onclick="applyTransform()">
         Apply
       </button>
     </div>
@@ -150,6 +150,9 @@ function showScaleWindow(object) {
     </div>
   `;
   $('#scalewindowcontent').html(template)
+  transformDirty = { scale: false, position: false };
+  $("#scaleWidth, #scaleHeight").on('input', function() { transformDirty.scale = true; });
+  $("#left, #xcenter, #right, #top, #ycenter, #bottom").on('input', function() { transformDirty.position = true; });
   var aspect = width / height
   $("#scaleWidth").keyup(function() {
     var width = Number($(this).val());
@@ -203,8 +206,22 @@ function showScaleWindow(object) {
   Metro.init();
 }
 
-function scaleObj() {
-  storeUndo(true);
+function applyTransform() {
+  if (transformDirty.scale && transformDirty.position) {
+    // apply scale first, then position (moveObj recalculates bbox after scaling)
+    scaleObj(true);
+    moveObj(true);
+  } else if (transformDirty.scale) {
+    scaleObj();
+  } else if (transformDirty.position) {
+    moveObj();
+  } else {
+    scalewindow.style.visibility = "hidden";
+  }
+}
+
+function scaleObj(skipUndo) {
+  if (!skipUndo) storeUndo(true);
   var object = objectToScale;
   var bbox2 = new THREE.Box3().setFromObject(object);
   var width = (bbox2.max.x - bbox2.min.x).toFixed(2)
