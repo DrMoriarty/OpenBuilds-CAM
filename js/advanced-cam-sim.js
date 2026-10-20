@@ -47,7 +47,7 @@ function simstop() {
   $('#stopSimBtn').hide()
   // restore normal playback speed for any remaining tweens, but keep the
   // user's selected multiplier (timefactor) for the next run
-  if (typeof TweenLite !== 'undefined' && TweenLite.globalTimeScale) TweenLite.globalTimeScale(1);
+  simSetGlobalTimeScale(1);
   $('#gcodesent').html('0');
   // editor.gotoLine(0)
   cone.material = new THREE.MeshPhongMaterial({
@@ -61,6 +61,28 @@ function simstop() {
   clearSceneFlag = true;
 }
 
+// Set the global playback speed of the animation engine. The vendored
+// TweenMax (GSAP 2.x) build has no static TweenLite.globalTimeScale() --
+// globalTimeScale only exists as a TimelineLite/TimelineMax instance method --
+// so we apply the multiplier to GSAP's two root timelines directly, the same
+// way GSAP's own globalTimeScale() setter does (shifting _startTime so already
+// running tweens change speed instantly instead of jumping).
+function simSetGlobalTimeScale(value) {
+  if (typeof TweenLite === 'undefined') return;
+  if (typeof TweenLite.globalTimeScale === 'function') {
+    TweenLite.globalTimeScale(value);
+    return;
+  }
+  var rt = TweenLite._rootTimeline,
+    rft = TweenLite._rootFramesTimeline;
+  if (!rt || !rft) return;
+  var t = TweenLite.ticker.time,
+    f = TweenLite.ticker.frame;
+  rt._startTime = t - (t - rt._startTime) * rt._timeScale / value;
+  rft._startTime = f - (f - rft._startTime) * rft._timeScale / value;
+  rt._timeScale = rft._timeScale = value;
+}
+
 function simSpeed() {
   // cycle 1x -> 10x -> 100x -> 1000x -> 1x ...
   timefactor = timefactor * 10;
@@ -68,9 +90,7 @@ function simSpeed() {
   $('#simspeedval').text(timefactor);
   // apply immediately to the currently running tween too (not just to the
   // next gcode line), so the multiplier reacts instantly while simulating
-  if (!simstopped && typeof TweenLite !== 'undefined' && TweenLite.globalTimeScale) {
-    TweenLite.globalTimeScale(timefactor);
-  }
+  if (!simstopped) simSetGlobalTimeScale(timefactor);
 }
 
 // Calculate real-time duration (seconds) a machine would need for one parsed
@@ -133,7 +153,7 @@ function sim(startindex) {
 
     simstopped = false;
     // apply the (persisted) speed multiplier to playback right away
-    if (typeof TweenLite !== 'undefined' && TweenLite.globalTimeScale) TweenLite.globalTimeScale(timefactor);
+    simSetGlobalTimeScale(timefactor);
     $('#simspeedval').text(timefactor);
     var simIdx = startindex;
     $('#runSimBtn').hide()
