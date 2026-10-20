@@ -16,16 +16,37 @@ function loadFiles(files) {
 
 // Load one file
 function loadSVGFile(file) {
-  // Load SVG from file
-  console.log(file)
-  return lwsvgparser.loadFromFile(file).then(function(element) {
-      return lwsvgparser.parse().then(function(tags) {
-        drawFile(file.name, tags, false);
+  // Read the file as text so the document units can be detected:
+  // lw.svg-parser normalises mm/cm/in/pt/pc units to px at 90dpi,
+  // so files whose root width/height use physical units must be
+  // imported at 90dpi to keep their real-world size (editors without
+  // a fingerprint comment would otherwise fall back to the 96dpi
+  // default and import ~6% too small)
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var svgtext = e.target.result;
+    var forcedResol;
+    var roottag = svgtext.match(/<svg[^>]*>/i);
+    if (roottag) {
+      var widthAttr = roottag[0].match(/\swidth\s*=\s*["']([^"']*)["']/i);
+      var heightAttr = roottag[0].match(/\sheight\s*=\s*["']([^"']*)["']/i);
+      var physicalUnits = /(mm|cm|in|pt|pc)\s*$/i;
+      if ((widthAttr && physicalUnits.test(widthAttr[1])) || (heightAttr && physicalUnits.test(heightAttr[1]))) {
+        forcedResol = 90;
+      }
+    }
+    // Load SVG from file
+    console.log(file)
+    lwsvgparser.loadFromString(svgtext).then(function(element) {
+        return lwsvgparser.parse().then(function(tags) {
+          drawFile(file.name, tags, false, forcedResol);
+        });
+      })
+      .catch(function(error) {
+        // console.error('error:', error);
       });
-    })
-    .catch(function(error) {
-      // console.error('error:', error);
-    });
+  };
+  reader.readAsText(file);
 }
 
 
@@ -53,7 +74,7 @@ function svgtraverse(tag, callback) {
 
 };
 
-function drawFile(name, tag, flip) {
+function drawFile(name, tag, flip, forcedResol) {
   var editor = lwsvgparser.editor.name
   var version = parseFloat(lwsvgparser.editor.version)
   console.log(lwsvgparser)
@@ -62,7 +83,9 @@ function drawFile(name, tag, flip) {
     version = parseFloat(lwsvgparser.tags.attrs["inkscape:version"])
   }
   console.log(editor, version)
-  if (editor == "inkscape") {
+  if (forcedResol) {
+    resol = forcedResol;
+  } else if (editor == "inkscape") {
     if (version > 0.91) {
       resol = 90;
     } else if (version > 1.0) {
