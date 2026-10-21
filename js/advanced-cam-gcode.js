@@ -14,6 +14,32 @@ function trashGcode() {
   $('#trashicon').removeClass('fg-red').addClass('fg-gray');
 }
 
+// XY position where the head ended after the previously generated toolpath's
+// G-Code. Used as the reference point when choosing the entry vertex of the
+// first closed contour of the next toolpath, so rapid travel between toolpaths
+// is minimised. Reset at the start of every G-Code generation run.
+var gcodeLastHead = null;
+
+// index of the vertex closest to (x, y). Large contours are sampled with a
+// stride so the scan stays cheap on curves made of thousands of tiny segments
+function indexOfVertexClosestTo(vertices, x, y) {
+  var count = vertices.length - 1; // skip the duplicated "back to start"-point of closed contours
+  if (count < 1) count = vertices.length;
+  var stride = Math.max(1, Math.floor(count / 512));
+  var best = 0;
+  var bestD = Infinity;
+  for (var i = 0; i < count; i += stride) {
+    var dx = vertices[i].x - x;
+    var dy = vertices[i].y - y;
+    var d = dx * dx + dy * dy;
+    if (d < bestD) {
+      bestD = d;
+      best = i;
+    }
+  }
+  return best;
+}
+
 function makeGcode() {
   if (toolpathWorkersBusy()) {
     // console.log('not yet... rescheduling')
@@ -44,6 +70,7 @@ function makeGcodeExec() {
 
 
     setTimeout(function() {
+      gcodeLastHead = null; // head-position tracking starts fresh for this generation run
       for (j = 0; j < toolpathsInScene.length; j++) {
         // console.log(toolpathsInScene[j].userData.visible)
         if (toolpathsInScene[j].userData.visible) {
@@ -219,7 +246,7 @@ function generateGcode(index, toolpathGrp, cutSpeed, plungeSpeed, spindleRpm, la
         // Find longest segment
         // console.log("Vertices before optimise: ", child.geometry.vertices)
 
-        if (child.geometry.vertices.length > 2 && child.geometry.vertices[0].X === child.geometry.vertices[child.geometry.vertices.length - 1].X && child.geometry.vertices[0].Y === child.geometry.vertices[child.geometry.vertices.length - 1].Y) {
+        if (child.geometry.vertices.length > 2 && child.geometry.vertices[0].x === child.geometry.vertices[child.geometry.vertices.length - 1].x && child.geometry.vertices[0].y === child.geometry.vertices[child.geometry.vertices.length - 1].y) {
           //console.log("Setting Closed: ", child)
           child.userData.closed = true;
         } else {
@@ -230,7 +257,8 @@ function generateGcode(index, toolpathGrp, cutSpeed, plungeSpeed, spindleRpm, la
         // console.log(child.userData)
 
         if (child.geometry.vertices.length > 2) {
-          if (!child.userData.closed && toolpathsInScene[j].userData.camOperation.indexOf('Plasma') != 0) {
+          var isPlasma = toolpathsInScene[j].userData.camOperation.indexOf('Plasma') == 0;
+          if (!child.userData.closed && !isPlasma) {
             var bestSegment = indexOfMax(child.geometry.vertices)
             var bestSegment = child.geometry.vertices.slice(0)
             // console.log('longest section' + bestSegment)
@@ -239,6 +267,27 @@ function generateGcode(index, toolpathGrp, cutSpeed, plungeSpeed, spindleRpm, la
             var optimisedVertices = clone.rotateRight(bestSegment)
             optimisedVertices.push(optimisedVertices[0]) // add back the "go back to first point"-point - from the new first point
             console.log("Vertices after optimise: ", optimisedVertices)
+          } else if (child.userData.closed && !isPlasma) {
+            // Closed contour: a closed loop can be entered at any of its vertices,
+            // so rotate its vertices to start at the one closest to the current
+            // head position (where the previous contour, or the previous toolpath,
+            // ended) - this minimises the rapid move to its entry point.
+            // Plasma is excluded: its closed contours must keep starting at the
+            // lead-in attachment point.
+            var clone = child.geometry.vertices.slice(0);
+            var head = lastxyz ? {
+              x: parseFloat(lastxyz.x),
+              y: parseFloat(lastxyz.y)
+            } : gcodeLastHead;
+            if (head) {
+              var entryIndex = indexOfVertexClosestTo(clone, head.x, head.y);
+              if (entryIndex > 0) {
+                clone.splice(-1, 1) // remove the duplicated "go back to first point"-point before rotating
+                clone = clone.rotateRight(entryIndex)
+                clone.push(clone[0]) // close the contour again, from the new first point
+              }
+            }
+            var optimisedVertices = clone;
           } else {
             var optimisedVertices = child.geometry.vertices.slice(0)
           }
@@ -474,6 +523,14 @@ function generateGcode(index, toolpathGrp, cutSpeed, plungeSpeed, spindleRpm, la
   if (!isAtClearanceHeight) {
     g += "; retracting back to z-safe";
     g += "\n" + g0 + " Z" + clearanceHeight + "\n"; // Position Before Plunge!
+  }
+  // remember where the head ended (the retract to z-safe does not move XY), so
+  // the next toolpath can start its first closed contour as close as possible
+  if (lastxyz) {
+    gcodeLastHead = {
+      x: parseFloat(lastxyz.x),
+      y: parseFloat(lastxyz.y)
+    };
   }
   // console.log("Generated gcode. length:", g.length);
   return g;
