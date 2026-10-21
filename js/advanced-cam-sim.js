@@ -75,7 +75,7 @@ function toScreenPosition(obj, camera) {
 function simstop() {
   simstopped = true;
   if (simTickerActive) {
-    TweenLite.ticker.remove(simTick);
+    TweenLite.ticker.removeEventListener("tick", simTick);
     simTickerActive = false;
   }
   $('#runSimBtn').show()
@@ -183,9 +183,10 @@ function simCurrentPos() {
 }
 
 // Ticker callback: advance the machine clock and move the pointer.
-// TweenLite.ticker callbacks receive (time, deltaTime, frame); `time` is the
-// cumulative ticker time in seconds.
-function simTick(time) {
+// GSAP 1.x TweenLite.ticker listeners receive no arguments, so the ticker
+// time (seconds) is taken from performance.now() on every tick.
+function simTick() {
+  var time = performance.now() / 1000;
   if (simstopped) return;
   var dt;
   if (simLastTick === null) {
@@ -272,7 +273,7 @@ function sim(startindex) {
     $('#stopSimBtn').show()
     $('#editorContextMenu').hide() // sometimes we launch sim(linenum) from the context menu... close it once running
     simLastTick = null;
-    TweenLite.ticker.add(simTick);
+    TweenLite.ticker.addEventListener("tick", simTick);
     simTickerActive = true;
   }
 
