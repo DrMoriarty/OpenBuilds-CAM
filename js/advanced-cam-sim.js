@@ -1,4 +1,5 @@
-// Simulation speed multiplier (1x / 10x / 100x / 1000x, cycled by the speed button)
+// Simulation speed multipliers, cycled by the speed button (1x -> 2x -> 4x -> 8x -> 1x ...)
+var SIM_SPEED_STEPS = [1, 2, 4, 8];
 var timefactor = 1,
   simstopped = true;
 var simgcodeobj;
@@ -8,14 +9,44 @@ var simgcodeobj;
 // so we don't use the parsed (modal) feedrate for them. This matches the
 // rapidSpeed hardcoded in the toolpath G-Code generator (js/advanced-cam-gcode.js).
 var SIM_RAPID_FEEDRATE = 1000;
-// Minimum real-time duration (seconds) of any single simulated move, so that
-// zero-length / tiny moves don't stall or flood the tween chain
+// Minimum simulated *machine* duration (seconds) of any single move / fake
+// (comment / M-code) line, so that zero-length moves don't stall the sim loop
 var SIM_MIN_MOVE_SEC = 0.01;
+// The toolpointer cone is drawn this many mm above the actual Z of the path
+var SIM_CONE_Z_LIFT = 20;
+// Clamp the real-time delta consumed per tick (seconds) so that a background
+// tab / paused ticker doesn't teleport the pointer across the whole part
+var SIM_MAX_TICK_SEC = 0.25;
 
-// Simulation moves must be linear (constant velocity), not eased:
-// TweenMax's default ease (Quad.easeOut) starts fast and crawls into every
-// corner, which made the tool pointer look jerky and wrong
-var SIM_EASE = (typeof Linear !== 'undefined' && Linear.easeNone) ? Linear.easeNone : null;
+// ---------------------------------------------------------------------------
+// Simulation engine
+//
+// The pointer is NOT animated with one tween per gcode line: curvilinear
+// toolpaths consist of hundreds/thousands of tiny segments, and per-tween
+// overhead plus the ticker's frame granularity meant the speed multiplier had
+// no visible effect on them (a tween can never finish faster than one frame,
+// no matter the global time scale).
+//
+// Instead, all lines are precompiled into a flat list of machine-time segments
+// and a single ticker callback advances a "machine clock" at
+// (real elapsed time * timefactor), consuming as many segments per frame as
+// needed and lerping the cone position inside the active segment. The
+// multiplier therefore applies instantly and uniformly to straight *and*
+// curvilinear paths.
+// ---------------------------------------------------------------------------
+
+// Precompiled segments: { x, y, z, secs, idx } - endpoint, machine-duration in
+// seconds, and the index of the gcode line the segment belongs to
+var simMoves = [];
+// Index of the segment currently being traversed, and machine-seconds already
+// spent inside it
+var simSegIdx = 0;
+var simSegT = 0;
+// Timestamp of the previous ticker callback (ticker time, seconds)
+var simLastTick = null;
+var simTickerActive = false;
+// Last gcode line index shown in the #gcodesent counter (avoid DOM churn)
+var simLastLineIdx = -1;
 
 function enableSim() {
   $('#runSimBtn').prop('disabled', false)
@@ -43,11 +74,12 @@ function toScreenPosition(obj, camera) {
 
 function simstop() {
   simstopped = true;
+  if (simTickerActive) {
+    TweenLite.ticker.remove(simTick);
+    simTickerActive = false;
+  }
   $('#runSimBtn').show()
   $('#stopSimBtn').hide()
-  // restore normal playback speed for any remaining tweens, but keep the
-  // user's selected multiplier (timefactor) for the next run
-  simSetGlobalTimeScale(1);
   $('#gcodesent').html('0');
   // editor.gotoLine(0)
   cone.material = new THREE.MeshPhongMaterial({
@@ -61,48 +93,20 @@ function simstop() {
   clearSceneFlag = true;
 }
 
-// Set the global playback speed of the animation engine. The vendored TweenMax
-// build (GSAP 1.18.4) exposes globalTimeScale() only as a *static TweenMax*
-// method (TweenLite.globalTimeScale is undefined, and TweenLite._rootTimeline /
-// _rootFramesTimeline are not exposed either -- they live inside the closure),
-// so we call TweenMax.globalTimeScale() and fall back to the manual root
-// timeline manipulation (shifting _startTime so already running tweens change
-// speed instantly instead of jumping) only if that method is ever missing.
-function simSetGlobalTimeScale(value) {
-  if (typeof TweenMax !== 'undefined' && typeof TweenMax.globalTimeScale === 'function') {
-    TweenMax.globalTimeScale(value);
-    return;
-  }
-  if (typeof TweenLite === 'undefined') return;
-  if (typeof TweenLite.globalTimeScale === 'function') {
-    TweenLite.globalTimeScale(value);
-    return;
-  }
-  var rt = TweenLite._rootTimeline,
-    rft = TweenLite._rootFramesTimeline;
-  if (!rt || !rft) return;
-  var t = TweenLite.ticker.time,
-    f = TweenLite.ticker.frame;
-  rt._startTime = t - (t - rt._startTime) * rt._timeScale / value;
-  rft._startTime = f - (f - rft._startTime) * rft._timeScale / value;
-  rt._timeScale = rft._timeScale = value;
-}
-
 function simSpeed() {
-  // cycle 1x -> 10x -> 100x -> 1000x -> 1x ...
-  timefactor = timefactor * 10;
-  if (timefactor > 1000) timefactor = 1;
+  // cycle 1x -> 2x -> 4x -> 8x -> 1x ...
+  var i = SIM_SPEED_STEPS.indexOf(timefactor);
+  if (i < 0) i = 0;
+  timefactor = SIM_SPEED_STEPS[(i + 1) % SIM_SPEED_STEPS.length];
   $('#simspeedval').text(timefactor);
-  // apply immediately to the currently running tween too (not just to the
-  // next gcode line), so the multiplier reacts instantly while simulating
-  if (!simstopped) simSetGlobalTimeScale(timefactor);
+  // the ticker reads `timefactor` every frame, so the change applies instantly
 }
 
-// Calculate real-time duration (seconds) a machine would need for one parsed
-// gcode line, based on the actual distance and feedrate
+// Calculate simulated machine duration (seconds) of one parsed gcode line,
+// based on the actual distance and feedrate
 function simCalcMoveSeconds(line) {
   if (line.args.isFake) {
-    // comments / M-codes / empty lines: tiny pause so the sim loop keeps flowing
+    // comments / M-codes / empty lines: a brief pause so the sim keeps flowing
     return SIM_MIN_MOVE_SEC;
   }
   var dist = line.p2.dist || 0;
@@ -124,6 +128,106 @@ function simCalcMoveSeconds(line) {
   return Math.max(seconds, SIM_MIN_MOVE_SEC);
 }
 
+// Precompile the parsed gcode lines into a flat list of timed segments.
+// Fake lines (comments / M-codes) become zero-length pauses at the current
+// position; they only consume machine time.
+function simBuildMoves() {
+  simMoves = [];
+  var lines = object.userData.lines;
+  var prev = null;
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    var p;
+    if (line.p2) {
+      p = {
+        x: line.p2.x,
+        y: line.p2.y,
+        z: line.p2.z
+      };
+    } else {
+      // line without geometry (fake): hold the previous position
+      p = prev || {
+        x: 0,
+        y: 0,
+        z: 0
+      };
+    }
+    simMoves.push({
+      x: p.x,
+      y: p.y,
+      z: p.z,
+      secs: simCalcMoveSeconds(line),
+      idx: i
+    });
+    prev = p;
+  }
+}
+
+// Start position for a segment: endpoint of the previous segment (or the very
+// first point for segment 0)
+function simSegStart(segIdx) {
+  if (segIdx > 0) return simMoves[segIdx - 1];
+  return simMoves[0];
+}
+
+// Current interpolated pointer position within the active segment
+function simCurrentPos() {
+  var m = simMoves[simSegIdx];
+  var s = simSegStart(simSegIdx);
+  var f = m.secs > 0 ? Math.min(simSegT / m.secs, 1) : 1;
+  return {
+    x: s.x + (m.x - s.x) * f,
+    y: s.y + (m.y - s.y) * f,
+    z: s.z + (m.z - s.z) * f
+  };
+}
+
+// Ticker callback: advance the machine clock and move the pointer.
+// TweenLite.ticker callbacks receive (time, deltaTime, frame); `time` is the
+// cumulative ticker time in seconds.
+function simTick(time) {
+  if (simstopped) return;
+  var dt;
+  if (simLastTick === null) {
+    dt = 0;
+  } else {
+    dt = time - simLastTick;
+    if (dt < 0) dt = 0;
+    if (dt > SIM_MAX_TICK_SEC) dt = SIM_MAX_TICK_SEC;
+  }
+  simLastTick = time;
+
+  // consume machine time; a single frame may span many tiny segments
+  var machineDt = dt * timefactor;
+  while (machineDt > 0 && simSegIdx < simMoves.length) {
+    var remaining = simMoves[simSegIdx].secs - simSegT;
+    if (machineDt < remaining) {
+      simSegT += machineDt;
+      machineDt = 0;
+    } else {
+      machineDt -= remaining;
+      simSegT = 0;
+      simSegIdx++;
+    }
+  }
+
+  if (simSegIdx >= simMoves.length) {
+    simstop();
+    return;
+  }
+
+  var pos = simCurrentPos();
+  cone.position.set(pos.x, pos.y, pos.z + SIM_CONE_Z_LIFT);
+
+  // gcode line counter (only touch the DOM when the line actually changes)
+  var lineIdx = simMoves[simSegIdx].idx;
+  if (lineIdx !== simLastLineIdx) {
+    simLastLineIdx = lineIdx;
+    $('#gcodesent').html(lineIdx + 1);
+    // editor.gotoLine(lineIdx + 1)
+  }
+}
+
 function sim(startindex) {
   if (typeof(object) == 'undefined' || !scene.getObjectByName('gcodeobject')) {
     console.log('No Gcode in Preview yet')
@@ -131,23 +235,8 @@ function sim(startindex) {
     Metro.toast.create(message, null, 10000, 'bg-red');
     simstop()
   } else {
-    lastLine = {
-      x: 0,
-      y: 0,
-      z: 0,
-      e: 0,
-      f: 0,
-      feedrate: null,
-      extruding: false
-    };
     clearSceneFlag = true;
     cone.visible = true
-    var posx = object.userData.lines[0].p2.x; //- (sizexmax/2);
-    var posy = object.userData.lines[0].p2.y; //- (sizeymax/2);
-    var posz = object.userData.lines[0].p2.z + 20;
-    cone.position.x = posx;
-    cone.position.y = posy;
-    cone.position.z = posz;
     cone.material = new THREE.MeshPhongMaterial({
       color: 0x28a745,
       specular: 0x0000ff,
@@ -156,69 +245,35 @@ function sim(startindex) {
       transparent: true
     })
 
+    simBuildMoves();
+    if (simMoves.length === 0) {
+      simstop();
+      return;
+    }
+
+    // optionally start from a given gcode line (context menu "simulate from here")
+    var startSeg = 0;
+    if (startindex > 0) {
+      while (startSeg < simMoves.length && simMoves[startSeg].idx < startindex) startSeg++;
+    }
+    simSegIdx = startSeg;
+    simSegT = 0;
+    simLastLineIdx = -1;
+
+    // park the pointer at the start of the first segment to be traversed
+    var startPos = simSegStart(startSeg);
+    cone.position.set(startPos.x, startPos.y, startPos.z + SIM_CONE_Z_LIFT);
+    $('#gcodesent').html(simMoves[startSeg].idx + 1);
+    simLastLineIdx = simMoves[startSeg].idx;
+
     simstopped = false;
-    // apply the (persisted) speed multiplier to playback right away
-    simSetGlobalTimeScale(timefactor);
     $('#simspeedval').text(timefactor);
-    var simIdx = startindex;
     $('#runSimBtn').hide()
     $('#stopSimBtn').show()
     $('#editorContextMenu').hide() // sometimes we launch sim(linenum) from the context menu... close it once running
-    var runSim = function() {
-      if (simstopped == true) {
-        simstop();
-        return;
-      }
-      // editor.gotoLine(simIdx + 1)
-      $('#gcodesent').html(simIdx + 1);
-      // $('#simgcode').html(object.userData.lines[simIdx].args.origtext);
-      var line = object.userData.lines[simIdx];
-      var posx = line.p2.x; //- (sizexmax/2);
-      var posy = line.p2.y; //- (sizeymax/2);
-      var posz = line.p2.z;
-
-      var text = line.args.isFake ? line.args.text : line.args.cmd;
-      var simTimeInSec = simCalcMoveSeconds(line);
-      // the speed multiplier is applied live via TweenLite.globalTimeScale()
-
-      if (line.args.isFake) {
-        // no movement: advance to the next line after a short pause
-        TweenMax.delayedCall(simTimeInSec, function() {
-          if (simstopped == true) {
-            simstop();
-          } else {
-            simIdx++;
-            if (simIdx < object.userData.lines.length) {
-              runSim();
-            } else {
-              simstop();
-            }
-          }
-        });
-      } else {
-        TweenMax.to(cone.position, simTimeInSec, {
-          x: posx,
-          y: posy,
-          z: posz + 20,
-          ease: SIM_EASE || undefined,
-          onComplete: function() {
-            if (simstopped == true) {
-              //return
-              simstop();
-            } else {
-              simIdx++;
-              if (simIdx < object.userData.lines.length) {
-                runSim();
-              } else {
-                simstop();
-              }
-            }
-          }
-        })
-      }
-
-    };
-    runSim(); //kick it off
+    simLastTick = null;
+    TweenLite.ticker.add(simTick);
+    simTickerActive = true;
   }
 
 }
