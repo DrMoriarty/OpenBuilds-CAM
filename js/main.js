@@ -59,6 +59,9 @@ $(document).ready(function() {
   // No external requests at startup: the app must run fully offline.
   loadLastClosedOnPageload()
 
+  // Keep the rotated ribbon logo sized to the full ribbon height (tabs + content)
+  initRibbonLogo();
+
 
 
 
@@ -463,4 +466,32 @@ function isJson(item) {
   }
 
   return false;
+}
+// Rotated logo strip left of the ribbon: its vertical extent must equal the
+// full ribbon height (tabs-holder + content-holder). Logo is 400x92, so the
+// layout width of the box is ribbonHeight * 92/400.
+function initRibbonLogo() {
+  var nav = document.querySelector('nav[data-role="ribbonmenu"]');
+  var box = document.getElementById('ribbonLogoBox');
+  var img = document.getElementById('ribbonLogoImg');
+  if (!nav || !box || !img) return;
+
+  var AR = 92 / 400; // logo aspect ratio (height / width)
+
+  function sizeRibbonLogo() {
+    var h = nav.offsetHeight;
+    if (!h) return;
+    var pad = 4; // small breathing room above/below
+    var w = Math.max(h - pad, 10); // pre-rotation width -> vertical extent
+    var stripWidth = Math.max(w * AR, 4);
+    img.style.width = w + 'px';
+    img.style.height = stripWidth + 'px';
+    box.style.width = stripWidth + 'px';
+  }
+
+  sizeRibbonLogo();
+  window.addEventListener('resize', sizeRibbonLogo);
+  if (window.ResizeObserver) {
+    new ResizeObserver(sizeRibbonLogo).observe(nav);
+  }
 }

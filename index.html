@@ -33,26 +33,29 @@
 		<link rel="manifest" href="/manifest.json">
 
 		<style>
-			/* Rotated logo strip left of the ribbon tabs (Project / Settings) */
-			.tabs-holder-row {
+			/* Rotated logo strip left of the whole ribbon (tabs + content) */
+			.ribbon-row {
 				display: flex;
-				align-items: center;
-				border-bottom: 1px solid #dadbdc;
+				align-items: stretch;
 			}
 
-			.tabs-logo-box {
+			.ribbon-main {
+				flex: 1 1 auto;
+				min-width: 0;
+			}
+
+			.ribbon-logo-box {
 				position: relative;
 				flex: none;
-				width: 6px;
-				height: 25px; /* matches .ribbon-menu .tabs-holder row height */
-				margin-right: 2px;
+				width: 25px; /* fallback; JS keeps it in sync with the ribbon height */
+				margin-right: 3px;
 			}
 
-			.tabs-logo-box img {
+			.ribbon-logo-box img {
 				position: absolute;
 				top: 50%;
 				left: 50%;
-				width: 25px; /* rotated: becomes the vertical extent, fits the tabs row height */
+				width: 25px; /* fallback; rotated: becomes the vertical extent */
 				height: 6px;
 				transform: translate(-50%, -50%) rotate(-90deg);
 			}
@@ -107,16 +110,16 @@
 					<div class="window drop-shadow" style="height: calc(100% - 10px); overflow: hidden;">
 						<div class="window-content" style="overflow:hidden; height:100%;">
 							<nav data-role="ribbonmenu">
-								<div class="tabs-holder-row">
-									<span class="tabs-logo-box">
-										<img src="images/OpenBuildsCAM.svg" alt="OpenBuilds CAM" />
+								<div class="ribbon-row">
+									<span class="ribbon-logo-box" id="ribbonLogoBox">
+										<img src="images/OpenBuildsCAM.svg" alt="OpenBuilds CAM" id="ribbonLogoImg" />
 									</span>
-									<ul class="tabs-holder">
-										<li><a href="#section-workspace"><i class="fas fa-object-group"></i> Project</a></li>
-										<li><a href="#section-settings"><i class="fa fa-fw fa-cogs"></i> Settings</a></li>
-									</ul>
-								</div>
-								<div class="content-holder">
+									<div class="ribbon-main">
+										<ul class="tabs-holder">
+											<li><a href="#section-workspace"><i class="fas fa-object-group"></i> Project</a></li>
+											<li><a href="#section-settings"><i class="fa fa-fw fa-cogs"></i> Settings</a></li>
+										</ul>
+									<div class="content-holder">
 									<div class="section" id="section-workspace">
 
 										<div class="group">
@@ -339,6 +342,8 @@
 
 
 									</div>
+									</div> <!-- /.ribbon-main -->
+								</div> <!-- /.ribbon-row -->
 							</nav>
 							<div id="renderArea">
 
