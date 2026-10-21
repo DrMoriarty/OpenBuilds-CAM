@@ -475,9 +475,14 @@ function shapeFromLine(object, color, opacity) {
     // material.color.setRGB(0, 0.48, 1);
     material.transparent = true;
     var mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(object.position.x, object.position.y, object.position.z);
-    mesh.rotation.set(object.rotation.x, object.rotation.x, object.rotation.x);
-    mesh.scale.set(object.scale.x, object.scale.y, object.scale.z);
+    // Place the highlight using the object's full world transform instead of
+    // only its own position/rotation/scale: imported documents live inside a
+    // parent group that carries the auto-placement offset (and possibly other
+    // transforms), so copying only the line's own transform displaced the
+    // highlight away from the geometry under the cursor
+    object.updateMatrixWorld();
+    mesh.matrix.copy(object.matrixWorld);
+    mesh.matrix.decompose(mesh.position, mesh.rotation, mesh.scale);
     return mesh
   }
 
