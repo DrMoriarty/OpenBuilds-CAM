@@ -51,6 +51,9 @@ function drawDXF(file, fileName) {
   fileObject.userData.layers = $.unique(fileLayers);
   fileObject.position.x = 0;
   fileObject.position.y = 0;
+  // Position the new import at the workspace origin (or in the nearest free
+  // spot next to already imported objects) before registering it
+  autoPlaceImportedObject(fileObject, { silent: false });
   // fileObject.translateX((sizexmax / 2) * -1);
   // fileObject.translateY((sizeymax / 2) * -1);
   // putFileObjectAtZero(fileObject);

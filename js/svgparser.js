@@ -234,6 +234,10 @@ function drawFile(name, tag, flip, forcedResol) {
     }
   });
 
+  // Position the new import at the workspace origin (or in the nearest free
+  // spot next to already imported objects) before registering it
+  autoPlaceImportedObject(svgtagobject, { silent: false });
+
   objectsInScene.push(svgtagobject)
   fillTree();
 }
