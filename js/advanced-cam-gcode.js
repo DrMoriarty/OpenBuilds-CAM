@@ -279,13 +279,21 @@ function generateGcode(index, toolpathGrp, cutSpeed, plungeSpeed, spindleRpm, la
               x: parseFloat(lastxyz.x),
               y: parseFloat(lastxyz.y)
             } : gcodeLastHead;
-            if (head) {
-              var entryIndex = indexOfVertexClosestTo(clone, head.x, head.y);
-              if (entryIndex > 0) {
-                clone.splice(-1, 1) // remove the duplicated "go back to first point"-point before rotating
-                clone = clone.rotateRight(entryIndex)
-                clone.push(clone[0]) // close the contour again, from the new first point
-              }
+            if (!head) {
+              // First contour of the very first toolpath of the run: the head
+              // is still parked at the machine origin (0, 0), so enter the
+              // loop at the vertex closest to the origin to minimise the
+              // initial rapid (empty) move.
+              head = {
+                x: 0,
+                y: 0
+              };
+            }
+            var entryIndex = indexOfVertexClosestTo(clone, head.x, head.y);
+            if (entryIndex > 0) {
+              clone.splice(-1, 1) // remove the duplicated "go back to first point"-point before rotating
+              clone = clone.rotateRight(entryIndex)
+              clone.push(clone[0]) // close the contour again, from the new first point
             }
             var optimisedVertices = clone;
           } else {
