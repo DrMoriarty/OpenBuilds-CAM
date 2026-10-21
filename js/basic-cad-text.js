@@ -198,8 +198,68 @@ function getText(fontFamily, fontVariant, text, fontSize) {
   });
 }
 
+// --- True-size (1:1) preview -------------------------------------------------
+//
+// How big does a text created here actually become on the workpiece?
+// addText() renders the outlines with opentype.js at `fontsize` (the em size
+// in "font pixels"), wraps them in an SVG with viewBox="0 0 50 50" and
+// width="150px", and imports it through lw.svg-parser + drawFile():
+//  - the parser scales the outline coordinates by width/viewBox = 150/50 = 3
+//  - drawFile() imports Opentype.js documents at 57dpi (scale = 25.4/57 mm
+//    per unit, see js/svgparser.js)
+// So 1 unit of the Size field corresponds to an em box of
+// 3 * 25.4 / 57 ≈ 1.337 mm on the workpiece (measured empirically: Size 2
+// with "Type Here" in Bowlby One SC produces a 2 mm x 15 mm object).
+// The preview renders the text with the chosen webfont (css/fonts.css) at
+// that exact physical size: 1 workpiece mm = 1 screen mm = 96/25.4 CSS px
+// (standard 96dpi display, 100% browser zoom).
+
+var TEXT_PREVIEW_MM_PER_UNIT = 3 * 25.4 / 57;
+var TEXT_PREVIEW_CSS_PX_PER_MM = 96 / 25.4;
+
+function getTextPreviewCssFontSize(size) {
+  size = parseFloat(size);
+  if (!isFinite(size) || size <= 0) size = 20;
+  return size * TEXT_PREVIEW_MM_PER_UNIT * TEXT_PREVIEW_CSS_PX_PER_MM;
+}
+
+function updateTextPreview() {
+  var val = $('#font').val() || 'Bowlby+One+SC';
+  // replace + signs with spaces for css, split off the weight suffix
+  var family = val.replace(/\+/g, ' ').split(':')[0];
+  var csspx = getTextPreviewCssFontSize($('#fontsize').val());
+  $('#textpreview')
+    .css('font-family', family)
+    .css('font-size', csspx.toFixed(2) + 'px')
+    .text($('#texttorender').val() || 'Type Here');
+}
+
 $(document).ready(function() {
   var modal = `
+  <style>
+    #textpreviewbox {
+      position: relative;
+      width: 100%;
+      height: 80px;
+      margin-top: 8px;
+      overflow: hidden;
+      background: #ffffff;
+      border: 1px solid #7f7f7f;
+    }
+    #textpreview {
+      position: absolute;
+      left: 8px;
+      bottom: 6px;
+      line-height: 1;
+      white-space: nowrap;
+      color: #111111;
+    }
+    #textpreviewhint {
+      margin-top: 4px;
+      font-size: 11px;
+      opacity: 0.7;
+    }
+  </style>
 
   <div class="dialog dark" data-overlay-click-close="true" data-role="dialog" id="addShapeText" data-to-top="true">
     <div class="dialog-title" id="statusTitle">Add Text</div>
@@ -236,6 +296,10 @@ $(document).ready(function() {
     <div class="input-addon">
       <input style="width: 100%;" id="texttorender" class="active-border" value="Type Here"></input>
     </div>
+    <div id="textpreviewbox" title="Preview at true size: what you see here is the size the text will be cut/engraved on the workpiece (1:1 on a standard 96dpi display at 100% browser zoom). Oversized text is clipped to the preview area.">
+      <div id="textpreview"></div>
+    </div>
+    <div id="textpreviewhint">Preview at true size (1:1 on screen = on the workpiece) &middot; oversized text is clipped</div>
     </div>
     <div class="dialog-actions" id="statusFooter">
       <button class="button js-dialog-close">Cancel</button>
@@ -245,28 +309,22 @@ $(document).ready(function() {
 `
   $("body").append(modal);
 
-  $('#texttorender').css('font-family', "Bowlby One SC");
-
   $('#font').fontselect({
     placeholder: 'Bowlby One SC',
     lookahead: 3
   }).change(function() {
-
-    // replace + signs with spaces for css
-    var font = $(this).val().replace(/\+/g, ' ');
-    // split font into family and weight
-    font = font.split(':');
-    // set family on paragraphs
-    $('#texttorender').css('font-family', font[0]);
-    // console.log('font-family', font[0])
-    var fontsize = $('#fontsize').val();
-    $('#texttorender').css('font-size', fontsize + "px");
+    updateTextPreview();
   }).val("Bowlby+One+SC");
 
-  $('#fontsize').change(function() {
-    var fontsize = $('#fontsize').val();
-    $('#texttorender').css('font-size', fontsize + "px");
+  $('#fontsize').on('input change', function() {
+    updateTextPreview();
   });
+
+  $('#texttorender').on('input', function() {
+    updateTextPreview();
+  });
+
+  updateTextPreview();
 
   $("#CreateText").on("click", function() {
     event.preventDefault();
