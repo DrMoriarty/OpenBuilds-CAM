@@ -387,6 +387,33 @@ module.exports = [
 		rules: correctnessRules
 	},
 
+	// Node scripts (npm run check/lint/check-html, static server for the
+	// Playwright smoke tests) and the node:test unit tests — Node/CommonJS.
+	{
+		files: ['scripts/**/*.js', 'test/**/*.js', 'playwright.config.js'],
+		languageOptions: {
+			sourceType: 'commonjs',
+			ecmaVersion: 2022,
+			globals: {
+				require: 'readonly',
+				module: 'writable',
+				exports: 'writable',
+				process: 'readonly',
+				Buffer: 'readonly',
+				__dirname: 'readonly',
+				__filename: 'readonly',
+				console: 'readonly',
+				setTimeout: 'readonly',
+				clearTimeout: 'readonly',
+				setInterval: 'readonly',
+				clearInterval: 'readonly',
+				URL: 'readonly',
+				window: 'readonly' // Playwright page.evaluate() callbacks run in the browser
+			}
+		},
+		rules: correctnessRules
+	},
+
 	// Web worker: runs only inside new Worker(), where `window` is undefined
 	// (the file guards on that itself) and importScripts/self/postMessage exist.
 	// The file is historically a copy-paste of main-thread code and shares the

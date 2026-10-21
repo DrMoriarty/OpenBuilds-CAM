@@ -1,3 +1,5 @@
 node_modules/
 dist/
 .drcode
+test-results/
+playwright-report/
