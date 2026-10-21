@@ -94,7 +94,10 @@ test('all bundled workspace .obc files are served and parse as workspace JSON', 
   }
 });
 
-test('loading a workspace .obc file parses cleanly', async ({ page }) => {
+// Load workspace/helloworld.obc through the app's own #file input and wait
+// until the drawing and the toolpath preview workers are done. Shared setup
+// for the interactive G-code / simulation / export smoke paths below.
+async function loadHelloWorldWorkspace(page) {
   await page.setInputFiles('#file', path.join(__dirname, '..', '..', 'workspace', 'helloworld.obc'));
   // readFile -> loadWorkspace -> parseLoadWorkspace (sync) and the delayed
   // fillTree/makeGcode/toolpathPreview chain (setTimeout 250/500/200ms)
@@ -103,6 +106,92 @@ test('loading a workspace .obc file parses cleanly', async ({ page }) => {
     .toBeGreaterThan(0);
   // let the toolpath workers triggered by makeGcode() finish
   await page.waitForTimeout(4000);
+}
+
+// Trigger a fresh G-code generation and wait until the gcode parser worker
+// delivers a new object. Loading the workspace already runs makeGcode() via
+// its own delayed chain, so the object built by *this* call is distinguished
+// by tagging the previous one (each parse creates a brand-new THREE.Line,
+// whose userData cannot carry the tag). While the worker runs, parseGcode
+// InWebWorker() sets `object = false`, which the poll tolerates.
+async function regenerateGcodeAndWait(page) {
+  await page.evaluate(() => {
+    if (window.object && window.object.userData) window.object.userData.__e2eSeen = true;
+    window.makeGcode();
+  });
+  await expect
+    .poll(() => page.evaluate(() => {
+      const o = window.object;
+      return !!(o && o.userData && !o.userData.__e2eSeen && o.userData.lines && o.userData.lines.length > 1);
+    }), { timeout: 30000 })
+    .toBe(true);
+}
+
+test('loading a workspace .obc file parses cleanly', async ({ page }) => {
+  await loadHelloWorldWorkspace(page);
+  expect(page._pageErrors, 'uncaught page errors').toEqual([]);
+  expect(page._consoleErrors, 'console.error output').toEqual([]);
+});
+
+test('makeGcode() produces a gcodeobject in the scene', async ({ page }) => {
+  await loadHelloWorldWorkspace(page);
+  await regenerateGcodeAndWait(page);
+  // the fresh object was added to the scene under the name sim() looks up
+  expect(await page.evaluate(() => !!window.scene.getObjectByName('gcodeobject'))).toBe(true);
+  expect(page._pageErrors, 'uncaught page errors').toEqual([]);
+  expect(page._consoleErrors, 'console.error output').toEqual([]);
+});
+
+test('simulation runs the gcode to completion without page or console errors', async ({ page }) => {
+  // Regression for #bb32d406: sim() registers the ticker via
+  // TweenLite.ticker.addEventListener (js/advanced-cam-sim.js); the broken
+  // TweenLite.ticker.add() call threw right here and killed the whole path.
+  await loadHelloWorldWorkspace(page);
+  await regenerateGcodeAndWait(page);
+
+  // sim() is synchronous: it precompiles the segments, parks the cone at the
+  // start and hands control to the ticker. The helloworld program is ~10
+  // minutes of machine time (thousands of tiny segments), so scale the speed
+  // multiplier to whatever makes the whole run fit in a few seconds of wall
+  // time — the ticker reads `timefactor` every frame, any value works.
+  const startState = await page.evaluate(() => {
+    var totalSecs = 0;
+    window.simBuildMoves();
+    for (var i = 0; i < window.simMoves.length; i++) totalSecs += window.simMoves[i].secs;
+    window.timefactor = Math.max(1, Math.ceil(totalSecs / 8));
+    window.sim();
+    return {
+      segs: window.simMoves.length,
+      stopped: window.simstopped,
+      startPos: { x: window.cone.position.x, y: window.cone.position.y, z: window.cone.position.z }
+    };
+  });
+  expect(startState.segs, 'precompiled sim segments').toBeGreaterThan(0);
+  expect(startState.stopped, 'sim started (not stopped immediately)').toBe(false);
+
+  // the ticker consumes segments and calls simstop() on its own at the end
+  // — no fragile per-segment timing assertions, just "it got there"
+  await expect
+    .poll(() => page.evaluate(() => window.simstopped && window.simSegIdx >= window.simMoves.length), { timeout: 40000 })
+    .toBe(true);
+
+  const endPos = await page.evaluate(() => ({ x: window.cone.position.x, y: window.cone.position.y, z: window.cone.position.z }));
+  expect(endPos, 'cone moved along the path').not.toEqual(startState.startPos);
+
+  expect(page._pageErrors, 'uncaught page errors').toEqual([]);
+  expect(page._consoleErrors, 'console.error output').toEqual([]);
+});
+
+test('exported gcode (prepgcodefile) contains the generated program', async ({ page }) => {
+  await loadHelloWorldWorkspace(page);
+  await regenerateGcodeAndWait(page);
+  // saveFileGcode()/previewFile() both build their payload via prepgcodefile(),
+  // so asserting on its output covers the export code path without native
+  // save dialogs or download plumbing
+  const gcode = await page.evaluate(() => window.prepgcodefile());
+  expect(typeof gcode).toBe('string');
+  expect(gcode.startsWith('; GCODE Generated by cam.openbuilds.com')).toBe(true);
+  expect(gcode, 'gcode payload has motion commands').toContain('G0');
   expect(page._pageErrors, 'uncaught page errors').toEqual([]);
   expect(page._consoleErrors, 'console.error output').toEqual([]);
 });
