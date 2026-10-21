@@ -61,13 +61,18 @@ function simstop() {
   clearSceneFlag = true;
 }
 
-// Set the global playback speed of the animation engine. The vendored
-// TweenMax (GSAP 2.x) build has no static TweenLite.globalTimeScale() --
-// globalTimeScale only exists as a TimelineLite/TimelineMax instance method --
-// so we apply the multiplier to GSAP's two root timelines directly, the same
-// way GSAP's own globalTimeScale() setter does (shifting _startTime so already
-// running tweens change speed instantly instead of jumping).
+// Set the global playback speed of the animation engine. The vendored TweenMax
+// build (GSAP 1.18.4) exposes globalTimeScale() only as a *static TweenMax*
+// method (TweenLite.globalTimeScale is undefined, and TweenLite._rootTimeline /
+// _rootFramesTimeline are not exposed either -- they live inside the closure),
+// so we call TweenMax.globalTimeScale() and fall back to the manual root
+// timeline manipulation (shifting _startTime so already running tweens change
+// speed instantly instead of jumping) only if that method is ever missing.
 function simSetGlobalTimeScale(value) {
+  if (typeof TweenMax !== 'undefined' && typeof TweenMax.globalTimeScale === 'function') {
+    TweenMax.globalTimeScale(value);
+    return;
+  }
   if (typeof TweenLite === 'undefined') return;
   if (typeof TweenLite.globalTimeScale === 'function') {
     TweenLite.globalTimeScale(value);
