@@ -33,36 +33,28 @@
 		<link rel="manifest" href="/manifest.json">
 
 		<style>
-			/* Navbar container */
-			.navbar {
-				background-color: #000;
-				height: 48px;
+			/* Rotated logo strip left of the ribbon tabs (Project / Settings) */
+			.tabs-holder-row {
 				display: flex;
 				align-items: center;
-				padding: 0 20px;
-				margin: 0px;
+				border-bottom: 1px solid #dadbdc;
 			}
 
-			/* Navbar links styled as tabs */
-			.navbar a {
-				color: #fff;
-				font-family: "Open Sans", Helvetica, Arial, sans-serif;
-				font-size: 13px;
-				text-decoration: none;
-				padding: 0 15px;
-				height: 48px;
-				line-height: 48px;
-				display: inline-block;
+			.tabs-logo-box {
+				position: relative;
+				flex: none;
+				width: 6px;
+				height: 25px; /* matches .ribbon-menu .tabs-holder row height */
+				margin-right: 2px;
 			}
 
-			/* Hover effect */
-			.navbar a:hover {
-				background-color: #ff0000;
-			}
-
-			/* Hover effect */
-			.navbar a.active {
-				background-color: #ff0000;
+			.tabs-logo-box img {
+				position: absolute;
+				top: 50%;
+				left: 50%;
+				width: 25px; /* rotated: becomes the vertical extent, fits the tabs row height */
+				height: 6px;
+				transform: translate(-50%, -50%) rotate(-90deg);
 			}
 
 			.bg-obred {
@@ -113,21 +105,17 @@
 			<div data-role="splitter" data-split-sizes="80,20" data-min-sizes="480,400" class="h-100">
 				<div id="col1" style="overflow: hidden;">
 					<div class="window drop-shadow" style="height: calc(100% - 10px); overflow: hidden;">
-						<div class="window-caption bg-black" style="height: 90px; padding: 10px;">
-							<img src="images/OpenBuildsCAM.svg" height="70" alt="OpenBuilds CAM" />
-							<div class="navbar">
-								<a href="https://us.openbuilds.com" target="_blank">Part Store</a>
-								<a href="https://docs.openbuilds.com" target="_blank">Documentation</a>
-								<a href="https://builds.openbuilds.com" target="_blank">Community</a>
-								<a href="https://support.openbuilds.com" target="_blank">Support</a>
-							</div>
-						</div>
-						<div class="window-content pt-2" style="overflow:hidden; ">
+						<div class="window-content" style="overflow:hidden; height:100%;">
 							<nav data-role="ribbonmenu">
-								<ul class="tabs-holder">
-									<li><a href="#section-workspace"><i class="fas fa-object-group"></i> Project</a></li>
-									<li><a href="#section-settings"><i class="fa fa-fw fa-cogs"></i> Settings</a></li>
-								</ul>
+								<div class="tabs-holder-row">
+									<span class="tabs-logo-box">
+										<img src="images/OpenBuildsCAM.svg" alt="OpenBuilds CAM" />
+									</span>
+									<ul class="tabs-holder">
+										<li><a href="#section-workspace"><i class="fas fa-object-group"></i> Project</a></li>
+										<li><a href="#section-settings"><i class="fa fa-fw fa-cogs"></i> Settings</a></li>
+									</ul>
+								</div>
 								<div class="content-holder">
 									<div class="section" id="section-workspace">
 
