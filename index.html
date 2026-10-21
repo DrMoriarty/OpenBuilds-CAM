@@ -504,6 +504,9 @@
 							</div>
 							<div class="window-content p-1 text-center  mt-1" style="overflow-y:hidden;">
 								<button class="button drop-shadow" style="width: 300px;" title=" Generate G-Code" id="generatetpgcode" onclick="makeGcode();"><span class="fa fa-cubes fa-fw icon"></span>Generate G-Code</button>
+								<div id="gcodetimeestimate" style="display: none; margin-top: 6px; font-size: 12px;" title="Estimated execution time of the generated G-Code (feed moves at programmed feedrate, rapids at rapid rate, plus dwells)">
+									<i class="fa fa-clock fa-fw fg-gray"></i> Estimated run time: <span id="gcodetimeestimatevalue" class="fg-grayBlue">--</span>
+								</div>
 							</div>
 						</div>
 

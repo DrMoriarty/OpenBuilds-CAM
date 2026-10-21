@@ -1,5 +1,6 @@
 function trashGcode() {
   simstop()
+  hideGcodeTimeEstimate()
   if (scene.getObjectByName('gcodeobject')) {
     // console.log("Existing GCODE object: Cleaning up first")
     scene.remove(scene.getObjectByName('gcodeobject'))
@@ -12,6 +13,90 @@ function trashGcode() {
   $('#gcodetrashbtn2').addClass('disabled');
   $('#gcodepreviewicon').removeClass('fg-grayBlue').addClass('fg-gray');
   $('#trashicon').removeClass('fg-red').addClass('fg-gray');
+}
+
+// Estimated execution time of the generated G-Code, shown under the
+// "Generate G-Code" button. The estimate walks the assembled G-Code and sums:
+// - G0/G1 move distances divided by the currently active feedrate (F is modal,
+//   exactly as the firmware interprets it; rapids fall back to the app's
+//   rapid rate of 1000 mm/min when no F has been seen yet)
+// - G4 dwell times (P = seconds, S = seconds; P-as-milliseconds dialects will
+//   slightly overestimate, which is safe for an estimate)
+// G20/G21 inch/mm modes are respected. Arcs (G2/G3) are not emitted by this
+// app and are treated as rapids-free no-ops if they ever appear.
+function estimateGcodeRuntimeSeconds(gcode) {
+  var seconds = 0;
+  var x = 0, y = 0, z = 0;
+  var feed = 0; // active feedrate in mm/min (modal)
+  var unitScale = 1; // mm-mode default; G20 switches to 25.4
+  var lines = gcode.split(/\r?\n/);
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i];
+    var semi = line.indexOf(';');
+    if (semi > -1) line = line.substring(0, semi);
+    line = line.trim().toUpperCase();
+    if (!line) continue;
+
+    if (/^G20\b/.test(line)) unitScale = 25.4;
+    else if (/^G21\b/.test(line)) unitScale = 1;
+
+    if (/\bG4\b/.test(line)) {
+      var pdwell = line.match(/\bP([\d.]+)/);
+      var sdwell = line.match(/\bS([\d.]+)/);
+      if (pdwell) seconds += parseFloat(pdwell[1]);
+      if (sdwell) seconds += parseFloat(sdwell[1]);
+      continue;
+    }
+
+    var move = line.match(/\bG0*(\d)\b/);
+    if (move && (move[1] === '0' || move[1] === '1')) {
+      var fword = line.match(/\bF([\d.]+)/);
+      if (fword) feed = parseFloat(fword[1]) * unitScale;
+      var xw = line.match(/\bX(-?[\d.]+)/);
+      var yw = line.match(/\bY(-?[\d.]+)/);
+      var zw = line.match(/\bZ(-?[\d.]+)/);
+      var nx = xw ? parseFloat(xw[1]) * unitScale : x;
+      var ny = yw ? parseFloat(yw[1]) * unitScale : y;
+      var nz = zw ? parseFloat(zw[1]) * unitScale : z;
+      var dx = nx - x, dy = ny - y, dz = nz - z;
+      var dist = Math.sqrt(dx * dx + dy * dy + dz * dz);
+      var rate = feed > 0 ? feed : 1000; // app default rapid rate
+      if (dist > 0 && rate > 0) seconds += (dist / rate) * 60;
+      x = nx; y = ny; z = nz;
+    }
+  }
+  return seconds;
+}
+
+// Human readable duration, e.g. "1h 12m 07s", "12m 07s", "07s", "4s"
+function formatRuntime(seconds) {
+  var s = Math.max(0, Math.round(seconds));
+  var h = Math.floor(s / 3600); s = s % 3600;
+  var m = Math.floor(s / 60); s = s % 60;
+  var pad = function(n) { return (n < 10 ? '0' : '') + n; };
+  if (h > 0) return h + 'h ' + pad(m) + 'm ' + pad(s) + 's';
+  if (m > 0) return m + 'm ' + pad(s) + 's';
+  return s + 's';
+}
+
+// Recomputes the estimate from the given G-Code text and shows it under the
+// Generate G-Code button
+function updateGcodeTimeEstimate(gcode) {
+  if (!gcode || !gcode.trim()) {
+    $('#gcodetimeestimate').hide();
+    return;
+  }
+  var seconds = estimateGcodeRuntimeSeconds(gcode);
+  if (seconds <= 0) {
+    $('#gcodetimeestimate').hide();
+    return;
+  }
+  $('#gcodetimeestimatevalue').html(formatRuntime(seconds));
+  $('#gcodetimeestimate').show();
+}
+
+function hideGcodeTimeEstimate() {
+  $('#gcodetimeestimate').hide();
 }
 
 // XY position where the head ended after the previously generated toolpath's
@@ -57,6 +142,7 @@ function makeGcodeExec() {
   if (toolpathsInScene.length > 0) {
 
     $('#gcodejobs').empty();
+    hideGcodeTimeEstimate(); // stale estimate while regenerating
 
     // Button on Ribbon Menu
     $("#generatetpgcode").html("<i class='fa fa-spinner fa-spin '></i> Generating, please wait");
