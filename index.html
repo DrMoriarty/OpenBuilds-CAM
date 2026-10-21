@@ -44,6 +44,16 @@
 				min-width: 0;
 			}
 
+			/* This app reuses .ribbon-main as a plain container for the tab strip
+			   + ribbon content, so Metro's ":active paints it blue" rule (meant for
+			   .ribbon-split-button handles) must not fire when a ribbon button is
+			   clicked anywhere inside it. */
+			.ribbon-main:active,
+			.ribbon-main.active {
+				border-color: transparent !important;
+				background-color: transparent !important;
+			}
+
 			.ribbon-logo-box {
 				position: relative;
 				flex: none;
