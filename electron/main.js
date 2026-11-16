@@ -42,7 +42,12 @@ const MIME = {
 
 // Must be called before app is ready. `standard` makes the scheme behave like
 // http:// (relative URLs, Web Workers, importScripts); `supportFetchAPI`
-// allows $.get()/fetch() against app:// URLs (workspace .obc files).
+// allows $.get()/fetch() against app:// URLs (workspace .obc files);
+// `corsEnabled` makes the scheme enforce CORS like http:// (cross-origin
+// reads against app:// are treated as CORS requests rather than allowed
+// unconditionally — GHSA-v3j7-r9gq-3gjw / GHSA-j84w-jfhq-vhvj). Since the
+// app itself is same-origin (everything is served from app://…), this does
+// not affect its own fetches.
 protocol.registerSchemesAsPrivileged([
 	{
 		scheme: SCHEME,
@@ -50,6 +55,7 @@ protocol.registerSchemesAsPrivileged([
 			standard: true,
 			secure: true,
 			supportFetchAPI: true,
+			corsEnabled: true,
 			stream: true,
 			codeCache: true,
 		},
@@ -119,8 +125,52 @@ function createWindow() {
 		},
 	});
 
+	if (process.env.OBC_SMOKE) runSmoke(win);
+
 	win.loadURL(`${SCHEME}://${HOST}/index.html`);
 	return win;
+}
+
+// Headless smoke check (run with `OBC_SMOKE=1 npx electron .`): verifies that
+// the app:// protocol serves index.html, that fetch() works against app://
+// (workspace .obc loading path used by $.get) and that Web Workers spawn and
+// load scripts over app:// — then exits with 0/1 for CI or upgrade testing.
+function runSmoke(win) {
+	win.webContents.on('did-fail-load', (_e, code, desc) => {
+		console.error(`[smoke] FAILED: did-fail-load ${code} ${desc}`);
+		app.exit(1);
+	});
+	win.webContents.once('did-finish-load', () => {
+		const check = `
+			(async () => {
+				const results = { title: document.title };
+				const ws = await (await fetch('${SCHEME}://${HOST}/workspace/helloworld.obc')).json();
+				results.workspaceFetch = ws && typeof ws === 'object' ? 'parsed' : 'bad';
+				results.worker = await new Promise((resolve) => {
+					const w = new Worker('${SCHEME}://${HOST}/electron/smoke-worker.js');
+					w.onmessage = (e) => { resolve(e.data); w.terminate(); };
+					w.onerror = (e) => { resolve('error: ' + e.message); w.terminate(); };
+					w.postMessage('ping');
+				});
+				return results;
+			})()
+		`;
+		win.webContents
+			.executeJavaScript(check, true)
+			.then((results) => {
+				console.log('[smoke]', JSON.stringify(results));
+				const ok =
+					results.title === 'OpenBuilds CAM' &&
+					results.workspaceFetch === 'parsed' &&
+					results.worker === 'pong:ping';
+				console.log(ok ? '[smoke] OK' : '[smoke] FAILED');
+				app.exit(ok ? 0 : 1);
+			})
+			.catch((err) => {
+				console.error('[smoke] FAILED:', err.message);
+				app.exit(1);
+			});
+	});
 }
 
 function blockTelemetry() {
