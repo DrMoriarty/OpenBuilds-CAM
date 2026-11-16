@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Minimal e2e fixture: a 100x50 mm rectangle drawn as a single closed path.
+     No editor fingerprint comment, so the app imports it at the 96dpi default. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="100mm" height="50mm" viewBox="0 0 100 50">
+  <path d="M 0 0 L 100 0 L 100 50 L 0 50 Z" fill="none" stroke="black"/>
+</svg>
