@@ -17,6 +17,7 @@
     "check-html": "node scripts/check-html.js",
     "verify": "npm run check && npm run lint && npm run check-html",
     "test": "node --test test/unit/*.test.js",
+    "goldens:update": "node test/unit/helpers/generate-goldens.js",
     "test:e2e": "playwright test"
   },
   "devDependencies": {

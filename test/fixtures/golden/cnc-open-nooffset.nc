@@ -1,0 +1,15 @@
+; Operation 0: CNC: Vector (no offset)
+; Endmill Diameter: 3
+M3 S1000; Start Spindle
+G4 P8; Wait 8 seconds for spindle to spin up to speed
+
+G0 Z7; move to z-safe height
+G0 F1000 X0.0000 Y0.0000
+
+G0 Z0
+G1 F700 Z-3.0000; Direct Plunge
+ G1 F1000 X30.0000 Y0.0000 Z-3.0000 S1000
+G1 F1000 X30.0000 Y40.0000 Z-3.0000 S1000
+G1 F1000 X0.0000 Y0.0000 Z-3.0000 S1000
+; retracting back to z-safe
+G0 Z7

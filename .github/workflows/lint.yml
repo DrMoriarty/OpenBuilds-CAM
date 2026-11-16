@@ -39,7 +39,13 @@ jobs:
         run: npm run check-html
 
       # --- Задача уровня 2: тесты ---------------------------------------------
-      - name: Unit tests (node:test)
+      # Includes the golden G-Code tests (test/unit/gcode-golden.test.js):
+      # fixtures from test/fixtures/*.json go through the real pipeline
+      # (toolpathworker → generateGcode) and are compared against the checked-in
+      # references in test/fixtures/golden/*.nc. An intended change to the
+      # generated G-Code must be committed together with refreshed references
+      # (`npm run goldens:update`).
+      - name: Unit tests (node:test, incl. golden G-Code)
         run: npm test
 
       # Playwright: пакет уже в devDependencies, скачиваем только браузер

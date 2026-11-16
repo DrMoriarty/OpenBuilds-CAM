@@ -1,0 +1,146 @@
+{
+	"description": "100x50 mm closed square, CNC outline cut with the 3 mm endmill offset to the OUTSIDE of the path, single 3 mm pass, spindle on",
+	"index": 0,
+	"performanceLimit": false,
+	"toolpath": {
+		"metadata": {
+			"version": 4.5,
+			"type": "Object",
+			"generator": "Object3D.toJSON"
+		},
+		"geometries": [
+			{
+				"uuid": "geo-square",
+				"type": "Geometry",
+				"data": {
+					"vertices": [
+						0,
+						0,
+						0,
+						100,
+						0,
+						0,
+						100,
+						50,
+						0,
+						0,
+						50,
+						0,
+						0,
+						0,
+						0
+					],
+					"normals": [],
+					"faces": []
+				}
+			}
+		],
+		"materials": [
+			{
+				"uuid": "mat-1",
+				"type": "LineBasicMaterial",
+				"color": 0,
+				"transparent": true,
+				"depthFunc": 3,
+				"depthTest": true,
+				"depthWrite": true
+			}
+		],
+		"object": {
+			"uuid": "grp-toolpath-0",
+			"type": "Group",
+			"name": "toolpath-0",
+			"userData": {
+				"visible": true,
+				"camUnion": "Yes",
+				"camToolDia": 3,
+				"camStepover": "1",
+				"camZStart": "0",
+				"camZStep": "3",
+				"camZDepth": "3",
+				"camTabDepth": "0",
+				"camTabSpace": "0",
+				"camTabWidth": "0",
+				"camDirection": "Climb",
+				"camFeedrate": 1000,
+				"camPlungerate": 700,
+				"camSpindleRpm": "1000",
+				"camLaserPower": 100,
+				"camZClearance": 7,
+				"camPlasmaIHS": "No",
+				"tRampPlunge": "No",
+				"camPasses": "1",
+				"camOperation": "CNC: Vector (path outside)"
+			},
+			"matrix": [
+				1,
+				0,
+				0,
+				0,
+				0,
+				1,
+				0,
+				0,
+				0,
+				0,
+				1,
+				0,
+				0,
+				0,
+				0,
+				1
+			],
+			"children": [
+				{
+					"uuid": "line-1",
+					"type": "Line",
+					"name": "POLYLINE0",
+					"userData": {
+						"layer": "test",
+						"color": 0,
+						"hover": false,
+						"link": "link0_0",
+						"selected": true
+					},
+					"matrix": [
+						1,
+						0,
+						0,
+						0,
+						0,
+						1,
+						0,
+						0,
+						0,
+						0,
+						1,
+						0,
+						0,
+						0,
+						0,
+						1
+					],
+					"geometry": "geo-square",
+					"material": "mat-1"
+				}
+			]
+		}
+	},
+	"gcodeArgs": {
+		"cutSpeed": 1000,
+		"plungeSpeed": 700,
+		"spindleRpm": 1000,
+		"laserPwr": 100,
+		"rapidSpeed": 1000,
+		"toolon": "",
+		"tooloff": "",
+		"clearanceHeight": 7,
+		"PlasmaIHS": "No",
+		"rampplunge": false
+	},
+	"stubs": {
+		"localStorage": {
+			"hasSpindle": "true"
+		}
+	}
+}
