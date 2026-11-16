@@ -3,6 +3,8 @@ name: Lint & Test
 # CI-проверка на каждый push в master и на все pull request'ы:
 # - статические проверки из задачи уровня 1: npm run check / lint / check-html;
 # - юнит-тесты на встроенном node:test (npm test, ноль зависимостей);
+# - покрытие строк js/ + workers/ юнит-тестами (npm run test:coverage,
+#   ноль зависимостей, мягкий пол в scripts/coverage.js);
 # - Playwright smoke-тесты: приложение открывается в headless Chromium по
 #   HTTP (не file:// — Web Workers и root-absolute importScripts требуют
 #   настоящий сервер, см. AGENTS.md), проверяется чистый старт без ошибок
@@ -47,6 +49,16 @@ jobs:
       # (`npm run goldens:update`).
       - name: Unit tests (node:test, incl. golden G-Code)
         run: npm test
+
+      # Line coverage of js/ + workers/ under the unit-test suite (incl.
+      # golden G-Code tests). Zero dependencies: scripts/coverage.js runs
+      # node --test with NODE_V8_COVERAGE and post-processes the raw V8
+      # dumps — the built-in reporter cannot see the vm.runInContext-loaded
+      # browser/worker code and never shows untested files. Enforces the
+      # soft floor recorded in scripts/coverage.js (baseline at
+      # implementation time, rounded down).
+      - name: Unit test coverage (js/ + workers/, soft floor)
+        run: npm run test:coverage
 
       # Playwright: пакет уже в devDependencies, скачиваем только браузер
       # (+ системные зависимости для headless Chromium на ubuntu).
