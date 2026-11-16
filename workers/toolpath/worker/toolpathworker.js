@@ -879,7 +879,7 @@ if (typeof window == "undefined") { // Only run as worker
     if (best === 0) return p;
     var body = explicitlyClosed ? p.slice(0, p.length - 1) : p.slice(0);
     var rotated = rotateArrayRight(body, best);
-    if (explicitlyClosed) rotated.push(rotated[0]);
+    if (explicitlyClosed) rotated.push({ X: rotated[0].X, Y: rotated[0].Y });
     return rotated;
   }
 

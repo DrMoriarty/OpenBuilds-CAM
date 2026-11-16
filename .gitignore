@@ -1,5 +1,15 @@
 node_modules/
 dist/
-.drcode
 test-results/
 playwright-report/
+
+.drcode/tasks/
+.drcode/settings.json
+.drcode/mcp.json
+.drcode/github_state.json
+.drcode/search_index.json
+.drcode/worktrees/
+.drcode/merge_reports/
+.drcode/stats.json
+.drcode/pending_notifications.json
+.drcode/goals/*.state.json
