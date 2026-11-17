@@ -37,9 +37,10 @@ function addJob(id) {
   $("#savetpgcode").addClass("disabled");
   $("#exportGcodeMenu").addClass("disabled");
 
-  // animation to move "doc" to Toolpath - helps user visualise what happened
-  $("#flyingdoc").css('top', '50%');
-  $("#flyingdoc").css('left', '50%');
+  // animation to move "doc" from Documents to Toolpath - helps user visualise what happened
+  var docsoffset = $('#documentstree').offset()
+  $("#flyingdoc").css('top', docsoffset.top);
+  $("#flyingdoc").css('left', docsoffset.left);
   $("#flyingdoc").fadeIn(200);
   var offset = $('#toolpathtree').offset()
   setTimeout(function() {
@@ -110,6 +111,7 @@ function remJob(id) {
   $("#exportGcodeMenu").addClass("disabled");
 
   // animation to remove "doc" from Toolpath - helps user visualize what happened
+  var docsoffset = $('#documentstree').offset()
   var offset = $('#toolpathtree').offset()
   $("#flyingdoc").css('top', offset.top);
   $("#flyingdoc").css('left', offset.left);
@@ -119,8 +121,8 @@ function remJob(id) {
     $("#flyingdoc").fadeOut(300);
   }, 200);
   $("#flyingdoc").animate({
-    left: '50%',
-    top: '50%'
+    left: docsoffset.left + 'px',
+    top: docsoffset.top + 'px'
   }, 600);
 
   var toolpath;
