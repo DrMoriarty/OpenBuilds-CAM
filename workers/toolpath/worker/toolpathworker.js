@@ -274,7 +274,24 @@ if (typeof window == "undefined") { // Only run as worker
         X: 0,
         Y: 0
       };
-      orderPathsToMinimiseRapids(newClipperPaths, travelCursor);
+      // The real plunge points are the vertices of the inflated loops, which
+      // can sit far from the raw entity's own vertices (e.g. a slot narrower
+      // than the tool inflates to a loop around its wide end only), so score
+      // the ordering against a throwaway inflation of each entity. One extra
+      // inflate per entity, skipped for very large jobs to bound worker time.
+      var entryCandidates = null;
+      if (config.offset != 0 && newClipperPaths.length >= 3 && newClipperPaths.length <= 400) {
+        entryCandidates = [];
+        for (var ocj = 0; ocj < newClipperPaths.length; ocj++) {
+          var probeLoop = workerGetInflatePath([ClipperLib.JS.Clone(newClipperPaths[ocj])], config.offset);
+          var candPts = [];
+          for (var ol = 0; ol < probeLoop.length; ol++) {
+            for (var ov = 0; ov < probeLoop[ol].length; ov++) candPts.push(probeLoop[ol][ov]);
+          }
+          entryCandidates.push(candPts);
+        }
+      }
+      orderPathsToMinimiseRapids(newClipperPaths, travelCursor, { entryPoints: entryCandidates });
       for (j = 0; j < newClipperPaths.length; j++) {
         if (config.offset != 0) {
           var inflatedPaths = workerGetInflatePath([newClipperPaths[j]], config.offset);
@@ -883,11 +900,141 @@ if (typeof window == "undefined") { // Only run as worker
     return rotated;
   }
 
+  // Entry point of a path for a head at (cx, cy), plus the rapid length to
+  // reach it and the point where the cut will end. A rotatable closed path is
+  // entered at the vertex closest to the head and ends back at that same
+  // vertex (the contour closes on itself); an open path is entered at its
+  // first vertex and ends at its last one. `cands` optionally overrides the
+  // vertex sampling with an explicit candidate list (e.g. the vertices of the
+  // inflated loop the entity will actually produce, which can sit far from
+  // the raw entity's own vertices).
+  function pathEntryAndCost(p, cands, cx, cy, allClosed) {
+    if (cands && cands.length) {
+      var bd = distSqXY(cands[0].X, cands[0].Y, cx, cy);
+      var bx = cands[0].X;
+      var by = cands[0].Y;
+      for (var ci = 1; ci < cands.length; ci++) {
+        var cd = distSqXY(cands[ci].X, cands[ci].Y, cx, cy);
+        if (cd < bd) {
+          bd = cd;
+          bx = cands[ci].X;
+          by = cands[ci].Y;
+        }
+      }
+      return { d: Math.sqrt(bd), ex: bx, ey: by };
+    }
+    if (p.length > 2 && (allClosed || isExplicitlyClosedPath(p))) {
+      var count = isExplicitlyClosedPath(p) ? p.length - 1 : p.length;
+      var stride = Math.max(1, Math.floor(count / 128));
+      var bestD = distSqXY(p[0].X, p[0].Y, cx, cy);
+      var bestV = 0;
+      for (var v = stride; v < count; v += stride) {
+        var dv = distSqXY(p[v].X, p[v].Y, cx, cy);
+        if (dv < bestD) {
+          bestD = dv;
+          bestV = v;
+        }
+      }
+      return { d: Math.sqrt(bestD), ex: p[bestV].X, ey: p[bestV].Y };
+    }
+    return {
+      d: Math.sqrt(distSqXY(p[0].X, p[0].Y, cx, cy)),
+      ex: p[p.length - 1].X,
+      ey: p[p.length - 1].Y
+    };
+  }
+
+  // Total rapid-travel cost of visiting the paths in the given index order,
+  // starting the head at (startX, startY). Mirrors how the greedy pass and the
+  // G-code generator treat each path (see pathEntryAndCost). Empty paths cost
+  // nothing. entryPoints (optional, index-matched to paths) supplies the
+  // per-path entry candidates described above.
+  function rapidTravelCostOfOrder(order, paths, startX, startY, allClosed, entryPoints) {
+    var total = 0;
+    var cx = startX;
+    var cy = startY;
+    for (var i = 0; i < order.length; i++) {
+      var p = paths[order[i]];
+      if (!p || p.length === 0) continue;
+      var cands = entryPoints ? entryPoints[order[i]] : null;
+      var ec = pathEntryAndCost(p, cands, cx, cy, allClosed);
+      total += ec.d;
+      cx = ec.ex;
+      cy = ec.ey;
+    }
+    return total;
+  }
+
+  // Post-optimisation of a route produced by the greedy nearest-neighbour
+  // pass: 2-opt (reverse a contiguous run of the route) and or-opt (relocate
+  // a single path elsewhere in the route), repeated until no candidate
+  // improves the total rapid travel any more. Greedy NN never plans ahead, so
+  // a row of contours started from its middle ends with one long jump between
+  // the halves - 2-opt removes exactly that kind of crossing. The route is a
+  // list of path indices; the paths themselves are not touched here (entry
+  // points get re-rotated by the caller once the final order is known).
+  // Bounded by a time budget so huge jobs cannot stall the worker thread.
+  function improvePathOrderRapids(order, paths, startX, startY, allClosed, entryPoints) {
+    var n = order.length;
+    if (n < 3) return order;
+    var deadline = Date.now() + 2000;
+    var best = order.slice();
+    var bestCost = rapidTravelCostOfOrder(best, paths, startX, startY, allClosed, entryPoints);
+    var improved = true;
+    var tick = 0;
+    var outOfTime = false;
+    while (improved && !outOfTime) {
+      improved = false;
+      var i, j, k, a, b, cand, cost;
+      // 2-opt: reverse order[i..j]
+      for (i = 0; i < n - 1 && !outOfTime; i++) {
+        for (j = i + 1; j < n; j++) {
+          if (((++tick) & 63) === 0 && Date.now() > deadline) {
+            outOfTime = true;
+            break;
+          }
+          cand = best.slice(0, i);
+          for (k = j; k >= i; k--) cand.push(best[k]);
+          for (k = j + 1; k < n; k++) cand.push(best[k]);
+          cost = rapidTravelCostOfOrder(cand, paths, startX, startY, allClosed, entryPoints);
+          if (cost < bestCost - 0.000001) {
+            best = cand;
+            bestCost = cost;
+            improved = true;
+          }
+        }
+      }
+      // or-opt: move a single path to a different position in the route
+      for (a = 0; a < n && !outOfTime; a++) {
+        for (b = 0; b < n; b++) {
+          if (b === a) continue;
+          if (((++tick) & 63) === 0 && Date.now() > deadline) {
+            outOfTime = true;
+            break;
+          }
+          cand = best.slice();
+          var moved = cand.splice(a, 1)[0];
+          cand.splice(b, 0, moved);
+          cost = rapidTravelCostOfOrder(cand, paths, startX, startY, allClosed, entryPoints);
+          if (cost < bestCost - 0.000001) {
+            best = cand;
+            bestCost = cost;
+            improved = true;
+          }
+        }
+      }
+    }
+    return best;
+  }
+
   // Greedy nearest-neighbour: repeatedly pick the path whose (rotatable) start
   // is closest to the current head position, starting from startPos (the machine
-  // origin / position where the job begins). Reorders `paths` in place. Any
-  // arrays in opts.parallel (e.g. matching lead-in paths) are reordered with
-  // the exact same permutation so index-matched arrays stay in sync.
+  // origin / position where the job begins). The greedy route is then polished
+  // with a 2-opt + or-opt post-optimisation (see improvePathOrderRapids) which
+  // removes the long jumps the myopic greedy pass leaves behind.
+  // Reorders `paths` in place. Any arrays in opts.parallel (e.g. matching
+  // lead-in paths) are reordered with the exact same permutation so
+  // index-matched arrays stay in sync.
   // opts.allClosedPolygons: true when every path is a closed Clipper polygon
   // (offsetter output) - allows entry-point rotation on all of them.
   function orderPathsToMinimiseRapids(paths, startPos, opts) {
@@ -895,51 +1042,75 @@ if (typeof window == "undefined") { // Only run as worker
     opts = opts || {};
     var allClosed = !!opts.allClosedPolygons;
     var parallel = opts.parallel || [];
+    // optional per-path entry candidates (index-matched to paths): the real
+    // plunge points, e.g. vertices of the loops the entities inflate into
+    var entryPoints = (opts.entryPoints && opts.entryPoints.length === paths.length) ? opts.entryPoints : null;
     var n = paths.length;
+    // --- pass 1: greedy nearest-neighbour, building the initial visit order
     var remaining = [];
     for (var i = 0; i < n; i++) remaining.push(i);
-    var newPaths = [];
-    var newParallel = [];
-    for (var pa = 0; pa < parallel.length; pa++) newParallel.push([]);
+    var order = [];
     var curX = startPos.X;
     var curY = startPos.Y;
     while (remaining.length > 0) {
       var bestK = -1;
       var bestD = Infinity;
       for (var k = 0; k < remaining.length; k++) {
-        var p = paths[remaining[k]];
-        if (!p || p.length === 0) continue;
-        var d = distSqXY(p[0].X, p[0].Y, curX, curY);
-        if (p.length > 2 && (allClosed || isExplicitlyClosedPath(p))) {
-          // a closed path can be entered at any of its vertices
-          var count = isExplicitlyClosedPath(p) ? p.length - 1 : p.length;
-          var stride = Math.max(1, Math.floor(count / 128));
-          for (var v = 0; v < count; v += stride) {
-            var dv = distSqXY(p[v].X, p[v].Y, curX, curY);
-            if (dv < d) d = dv;
-          }
-        }
-        if (d < bestD) {
-          bestD = d;
+        var pk = paths[remaining[k]];
+        if (!pk || pk.length === 0) continue;
+        var ck = entryPoints ? entryPoints[remaining[k]] : null;
+        var dk = pathEntryAndCost(pk, ck, curX, curY, allClosed).d;
+        if (dk < bestD) {
+          bestD = dk;
           bestK = k;
         }
       }
       if (bestK === -1) bestK = 0; // only empty paths left - preserve their order
       var idx = remaining.splice(bestK, 1)[0];
       var p = paths[idx];
-      if (p && p.length > 2) {
+      if (!entryPoints && p && p.length > 2) {
         p = rotatePathStartCloserTo(p, curX, curY, allClosed);
         paths[idx] = p;
       }
-      newPaths.push(p);
-      for (var pa2 = 0; pa2 < parallel.length; pa2++) {
-        if (parallel[pa2] && parallel[pa2].length === n) {
-          newParallel[pa2].push(parallel[pa2][idx]);
+      order.push(idx);
+      if (p && p.length > 0) {
+        if (entryPoints) {
+          // the head ends where this path's cut ends (its entry vertex)
+          var ec = pathEntryAndCost(p, entryPoints[idx], curX, curY, allClosed);
+          curX = ec.ex;
+          curY = ec.ey;
+        } else {
+          curX = p[p.length - 1].X;
+          curY = p[p.length - 1].Y;
         }
       }
-      if (p && p.length > 0) {
-        curX = p[p.length - 1].X;
-        curY = p[p.length - 1].Y;
+    }
+    // --- pass 2: 2-opt + or-opt post-optimisation of the visit order
+    order = improvePathOrderRapids(order, paths, startPos.X, startPos.Y, allClosed, entryPoints);
+    // --- pass 3: apply the final order - rebuild paths and every parallel
+    // array with the same permutation, re-rotating the entry point of each
+    // rotatable closed path toward its new predecessor's exit
+    var newPaths = [];
+    var newParallel = [];
+    for (var pa = 0; pa < parallel.length; pa++) newParallel.push([]);
+    curX = startPos.X;
+    curY = startPos.Y;
+    for (var t = 0; t < n; t++) {
+      var idx2 = order[t];
+      var p2 = paths[idx2];
+      if (p2 && p2.length > 2) {
+        p2 = rotatePathStartCloserTo(p2, curX, curY, allClosed);
+        paths[idx2] = p2;
+      }
+      newPaths.push(p2);
+      for (var pa2 = 0; pa2 < parallel.length; pa2++) {
+        if (parallel[pa2] && parallel[pa2].length === n) {
+          newParallel[pa2].push(parallel[pa2][idx2]);
+        }
+      }
+      if (p2 && p2.length > 0) {
+        curX = p2[p2.length - 1].X;
+        curY = p2[p2.length - 1].Y;
       }
     }
     for (var i2 = 0; i2 < n; i2++) paths[i2] = newPaths[i2];
