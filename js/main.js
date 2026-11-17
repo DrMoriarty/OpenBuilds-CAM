@@ -118,8 +118,33 @@ function readFile(evt) {
 }
 
 // drag/drop
+// Overlay #draganddrop is shown/hidden via a document-level dragenter/dragleave
+// nesting counter (covers cancelled drags: drop outside the window, Escape)
+// plus a watchdog timer re-armed by every dragover, as a safety net for
+// lost/quirky events (OS/Electron exotic cases).
 function initDragDrop() {
   var dropTarget = document.getElementById('renderArea');
+  var dragDepth = 0;
+  var watchdog = null;
+
+  var hideOverlay = function() {
+    dragDepth = 0;
+    if (watchdog !== null) {
+      clearTimeout(watchdog);
+      watchdog = null;
+    }
+    $('#draganddrop').hide();
+  };
+
+  // If drag events stop arriving (dragover fires continuously during an
+  // active drag, roughly every ~350ms), the drag is over for sure — hide.
+  var armWatchdog = function() {
+    if (watchdog !== null) clearTimeout(watchdog);
+    watchdog = setTimeout(function() {
+      watchdog = null;
+      hideOverlay();
+    }, 500);
+  };
 
   var onDragLeave = function(e) {
     e.stopPropagation();
@@ -131,14 +156,47 @@ function initDragDrop() {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy'; // Explicitly show this is a copy.
     $('#draganddrop').show();
+    armWatchdog();
   };
 
   var onDrop = function(e) {
     e.preventDefault();
-    $('#draganddrop').hide();
+    hideOverlay();
     console.log(e)
     readFile(e);
   };
+
+  var onDocDragEnter = function(e) {
+    e.preventDefault();
+    dragDepth++;
+    if (dragDepth === 1) {
+      $('#draganddrop').show();
+      armWatchdog();
+    }
+  };
+
+  var onDocDragOver = function(e) {
+    e.preventDefault();
+    armWatchdog();
+  };
+
+  var onDocDragLeave = function(e) {
+    e.preventDefault();
+    dragDepth--;
+    if (dragDepth <= 0) hideOverlay();
+  };
+
+  var onDocDrop = function(e) {
+    // Prevent the browser from opening/navigating on a stray drop outside
+    // #renderArea; do NOT load anything here — that is onDrop's job.
+    e.preventDefault();
+    hideOverlay();
+  };
+
+  document.addEventListener('dragenter', onDocDragEnter, false);
+  document.addEventListener('dragover', onDocDragOver, false);
+  document.addEventListener('dragleave', onDocDragLeave, false);
+  document.addEventListener('drop', onDocDrop, false);
 
   dropTarget.addEventListener('drop', onDrop, false);
   dropTarget.addEventListener('dragover', onDragOver, false);
