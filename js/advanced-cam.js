@@ -89,13 +89,13 @@ function addJob(id) {
       toolpathsInScene.push(toolpath)
     }
     setTimeout(function() {
-      fillTree();
+      fillToolpathTree(); // only the toolpaths block — keep the Documents tree expansion state
       setupJob(toolpathsInScene.length - 1);
     }, 800); // launch modal
   } else { // Existing toolpath
     // toolpath.children = sortToolpathByGeometryStartpoint(toolpath.children);
     setTimeout(function() {
-      fillTree();
+      fillToolpathTree(); // only the toolpaths block — keep the Documents tree expansion state
       toolpathPreview(id);
     }, 800); // launch modal
   }
