@@ -247,8 +247,12 @@ function parseLoadWorkspace(json, resetViewAfter) {
     resetView();
   }
   setTimeout(function() {
+    // one shared chain key: the toolpaths of the loaded workspace are
+    // computed sequentially, each rapid-ordered from the end of the
+    // previous one (see drawToolpath)
+    var batchKey = 'batch' + Date.now();
     for (i = 0; i < toolpathsInScene.length; i++) {
-      toolpathPreview(i);
+      toolpathPreview(i, batchKey);
     }
   }, 200);
   if (resetView) {

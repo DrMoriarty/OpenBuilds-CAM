@@ -112,8 +112,18 @@ async function loadHelloWorldWorkspace(page) {
   await expect
     .poll(() => page.evaluate(() => window.objectsInScene.length), { timeout: 15000 })
     .toBeGreaterThan(0);
-  // let the toolpath workers triggered by makeGcode() finish
-  await page.waitForTimeout(4000);
+  // let the toolpath preview workers triggered by makeGcode() finish. They
+  // run chained sequentially per batch (each toolpath is rapid-ordered from
+  // the end of the previous one), so poll for completion instead of a fixed
+  // wait: every toolpath computed, none still queued/running.
+  await expect
+    .poll(() => page.evaluate(() => {
+      if (window.toolpathWorkersBusy && window.toolpathWorkersBusy()) return false;
+      const tps = window.toolpathsInScene || [];
+      if (tps.length === 0) return false;
+      return tps.every((tp) => tp && tp.userData && tp.userData.inflated && !tp.userData.worker);
+    }), { timeout: 30000 })
+    .toBe(true);
 }
 
 // Trigger a fresh G-code generation and wait until the gcode parser worker

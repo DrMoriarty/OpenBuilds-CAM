@@ -85,15 +85,26 @@ function createToolpathWorkerSandbox() {
 		 * the parsed result, i.e. the toolpath group with userData.inflated
 		 * populated (still serialized, as the worker posts it).
 		 */
-		runToolpath(toolpathJson, index, performanceLimit) {
+		/**
+		 * Same as runToolpath, but returns the worker's whole final message
+		 * (toolpath JSON string + endPos) and accepts an optional startPos
+		 * payload as the main thread sends it when chaining toolpaths.
+		 */
+		runToolpathRaw(toolpathJson, index, performanceLimit, startPos) {
 			posted.length = 0;
 			const handler = sandbox.__onmessage;
 			if (typeof handler !== 'function') throw new Error('worker did not register a message handler');
-			handler({ data: { data: { toolpath: JSON.stringify(toolpathJson), index: index || 0, performanceLimit: !!performanceLimit } } });
+			const payload = { toolpath: JSON.stringify(toolpathJson), index: index || 0, performanceLimit: !!performanceLimit };
+			if (startPos !== undefined) payload.startPos = startPos;
+			handler({ data: { data: payload } });
 			for (let i = posted.length - 1; i >= 0; i--) {
-				if (posted[i].toolpath) return JSON.parse(posted[i].toolpath);
+				if (posted[i].toolpath) return posted[i];
 			}
 			throw new Error('worker produced no toolpath message');
+		},
+
+		runToolpath(toolpathJson, index, performanceLimit) {
+			return JSON.parse(this.runToolpathRaw(toolpathJson, index, performanceLimit).toolpath);
 		},
 	};
 }

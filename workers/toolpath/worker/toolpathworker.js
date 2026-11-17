@@ -14,20 +14,32 @@ if (typeof window == "undefined") { // Only run as worker
 
     var jobindex = e.data.data.index;
     var performanceLimit = e.data.data.performanceLimit;
+    // Where the head stands when this toolpath starts: the end of the
+    // previously computed toolpath, threaded through by the main thread
+    // (see workers/toolpath/toolpath.js). Falls back to the machine origin
+    // for the first toolpath of a job / standalone previews / old callers.
+    var startPos = (e.data.data.startPos && typeof e.data.data.startPos.X == "number" && typeof e.data.data.startPos.Y == "number") ? e.data.data.startPos : {
+      X: 0,
+      Y: 0
+    };
 
-    toolpathsjson = getToolpaths(toolpaths, jobindex, performanceLimit).toJSON();
+    var processedToolpath = getToolpaths(toolpaths, jobindex, performanceLimit, startPos);
+    toolpathsjson = processedToolpath.toJSON();
 
     var data = {
       toolpath: JSON.stringify(toolpathsjson),
       running: false,
-      index: jobindex
+      index: jobindex,
+      // last point of this toolpath's last contour - the main thread seeds
+      // the NEXT toolpath's rapid ordering with it
+      endPos: (processedToolpath.userData && processedToolpath.userData.endPos) ? processedToolpath.userData.endPos : null
     }
     self.postMessage(data);
   }, false);
 
 
 
-  function getToolpaths(toolpath, jobindex, performanceLimit) {
+  function getToolpaths(toolpath, jobindex, performanceLimit, startPos) {
     // Process Them
     // console.log(toolpath)
     var loader = new THREE.ObjectLoader();
@@ -56,6 +68,12 @@ if (typeof window == "undefined") { // Only run as worker
       tabwidth: parseFloat(toolpath.userData.camTabWidth, 2),
       direction: toolpath.userData.camDirection,
       performanceLimit: performanceLimit,
+      // machine position the head starts this toolpath from (end of the
+      // previous toolpath, or the origin); used as the rapid-ordering seed
+      startPos: startPos || {
+        X: 0,
+        Y: 0
+      },
     };
     var operation = toolpath.userData.camOperation;
     var data = {
@@ -176,6 +194,16 @@ if (typeof window == "undefined") { // Only run as worker
     }
     self.postMessage(data);
 
+    // publish where the head ends after this toolpath (its generators store
+    // it on the inflated group's userData); callers without an end position
+    // (pocket, drag knife, empty ops) leave it null so the main thread keeps
+    // the previous cursor instead
+    if (toolpath.userData.inflated && toolpath.userData.inflated.userData && toolpath.userData.inflated.userData.endPos) {
+      toolpath.userData.endPos = toolpath.userData.inflated.userData.endPos;
+    } else {
+      toolpath.userData.endPos = null;
+    }
+
     console.log(toolpath.userData.inflated.children.length)
 
     // console.log('Finished all the toolpaths')
@@ -223,15 +251,24 @@ if (typeof window == "undefined") { // Only run as worker
       // Order the paths so the head makes the shortest possible rapid moves
       // between them (instead of the arbitrary/size-based Clipper order).
       // Lead-in paths are reordered with the same permutation to stay index-matched.
-      // The start seed is searched (origin + bounding-box corners) so a set
-      // stretched away from the origin is swept in one pass, not two halves.
-      orderPathsToMinimiseRapidsBestSeed(inflatedPaths, {
-        X: 0,
-        Y: 0
-      }, {
+      // The start seed is searched (current head position + bounding-box
+      // corners) so a set stretched away from it is swept in one pass, not
+      // two halves.
+      orderPathsToMinimiseRapidsBestSeed(inflatedPaths, config.startPos, {
         allClosedPolygons: true,
         parallel: (typeof leadInPaths != "undefined" && leadInPaths) ? [leadInPaths] : []
       });
+      // remember where the head ends (last point of the last ordered
+      // contour) so the next toolpath can be ordered from the real
+      // machine position instead of the origin
+      var endPos = null;
+      if (inflatedPaths.length > 0 && inflatedPaths[inflatedPaths.length - 1].length > 0) {
+        var lastInflatedPath = inflatedPaths[inflatedPaths.length - 1];
+        endPos = {
+          X: lastInflatedPath[lastInflatedPath.length - 1].X,
+          Y: lastInflatedPath[lastInflatedPath.length - 1].Y
+        };
+      }
       for (i = config.zstart + config.zstep; i < config.zdepth + config.zstep; i += config.zstep) {
         if (i > config.zdepth) {
           var zval = -config.zdepth;
@@ -268,13 +305,15 @@ if (typeof window == "undefined") { // Only run as worker
         }
       }
       // end config.union = "Yes"
+      inflateGrpZ.userData.endPos = endPos || null;
     } else { // begin config.union="No"
       var newClipperPaths = clipperPaths;
       // Visit the entities in an order that minimises rapid travel between them
-      // (instead of the arbitrary/size-based order they were added in)
+      // (instead of the arbitrary/size-based order they were added in),
+      // starting where the previous toolpath's last contour ended
       var travelCursor = {
-        X: 0,
-        Y: 0
+        X: config.startPos.X,
+        Y: config.startPos.Y
       };
       // The real plunge points are the vertices of the inflated loops, which
       // can sit far from the raw entity's own vertices (e.g. a slot narrower
@@ -370,6 +409,11 @@ if (typeof window == "undefined") { // Only run as worker
           }
         }
       }
+      // head ends where the last entity's last path ended
+      inflateGrpZ.userData.endPos = (newClipperPaths.length > 0) ? {
+        X: travelCursor.X,
+        Y: travelCursor.Y
+      } : null;
     } // end config.union="No"
     if (config.offset > minimumToolDiaForPreview || config.offset < -minimumToolDiaForPreview) { //Dont show for very small offsets, not worth the processing time
       inflateGrpZ.userData.pretty = prettyGrp
@@ -2083,6 +2127,7 @@ if (typeof window == "undefined") { // Only run as worker
     prettyGrp.add(drawings.pretty)
     // console.log(drawings)
     inflateGrpZ.userData.pretty = prettyGrp
+    inflateGrpZ.userData.endPos = (drawings && drawings.endPos) ? drawings.endPos : null;
     return inflateGrpZ
   };
 
@@ -2189,6 +2234,17 @@ if (typeof window == "undefined") { // Only run as worker
       prettyGrpColor: fillColor
     }
     var drawings = drawClipperPathsWithTool(drawClipperPathsconfig);
+    // where the head ends after the merged fill route (last point of the
+    // last merged path), for the cross-toolpath travel cursor
+    if (camPaths.length > 0 && camPaths[camPaths.length - 1].length > 0) {
+      var lastMergedPath = camPaths[camPaths.length - 1];
+      drawings.endPos = {
+        X: lastMergedPath[lastMergedPath.length - 1].X,
+        Y: lastMergedPath[lastMergedPath.length - 1].Y
+      };
+    } else {
+      drawings.endPos = null;
+    }
     // console.log(JSON.stringify(drawings));
     return drawings;
   }
@@ -2491,8 +2547,9 @@ if (typeof window == "undefined") { // Only run as worker
       }
     });
     // Visit the drill points in an order that minimises rapid travel between
-    // them (instead of the order they appear in the document)
-    orderPointsToMinimiseRapids(drillPoints, {
+    // them (instead of the order they appear in the document), starting from
+    // the end of the previous toolpath (or the origin for the first one)
+    orderPointsToMinimiseRapids(drillPoints, config.startPos || {
       X: 0,
       Y: 0
     });
@@ -2502,6 +2559,11 @@ if (typeof window == "undefined") { // Only run as worker
       }
     }
     drillPath.userData.pretty = prettyGrp
+    // head ends at the last visited drill point
+    drillPath.userData.endPos = (drillPoints.length > 0) ? {
+      X: drillPoints[drillPoints.length - 1].x,
+      Y: drillPoints[drillPoints.length - 1].y
+    } : null;
     return drillPath;
   }
 
