@@ -429,7 +429,45 @@ function invokeSaveAsDialog(file, fileName) {
     return;
   }
 
-  saveViaDownloadLink(file, fileFullName);
+  // No File System Access API (Firefox/Safari): a bare download would land in
+  // the Downloads folder with no visible prompt at all, which reads as
+  // "nothing happened". Show a lightweight filename dialog first.
+  promptDownloadWithFilename(file, fileFullName);
+}
+
+// Visible filename dialog for browsers without window.showSaveFilePicker,
+// followed by a plain download into the browser's Downloads folder.
+function promptDownloadWithFilename(file, fileFullName) {
+  var dot = fileFullName.lastIndexOf('.');
+  var ext = dot > 0 ? fileFullName.slice(dot) : '';
+  Metro.dialog.create({
+    title: "Save file",
+    content: `<div class="form-group">
+          <label>Filename:</label>
+          <input type="text" id="saveAsFilename" value="` + fileFullName + `"/>
+          <small class="text-muted">This browser has no native "Save As" dialog - the file will be downloaded to your Downloads folder.</small>
+        </div>
+    `,
+    actions: [{
+        caption: "<span class='fas fa-download fa-fw'></span> Save",
+        cls: "js-dialog-close primary",
+        onclick: function() {
+          var name = $('#saveAsFilename').val() || fileFullName;
+          if (name.indexOf('.') === -1) {
+            name += ext;
+          }
+          saveViaDownloadLink(file, name);
+        }
+      },
+      {
+        caption: "Cancel",
+        cls: "js-dialog-close",
+        onclick: function() {
+          //
+        }
+      }
+    ]
+  });
 }
 
 // Native OS "Save As" dialog via the File System Access API
@@ -457,24 +495,22 @@ function saveViaDownloadLink(file, fileFullName) {
   // hyperlink.target = '_blank';
   hyperlink.download = fileFullName;
 
-  if (!!navigator.mozGetUserMedia) {
-    hyperlink.onclick = function() {
-      (document.body || document.documentElement).removeChild(hyperlink);
-    };
-    (document.body || document.documentElement).appendChild(hyperlink);
-  }
-
   var evt = new MouseEvent('click', {
     view: window,
     bubbles: true,
     cancelable: true
   });
 
+  // The anchor must be in the DOM for the synthetic click to be honoured
+  // reliably (Firefox/Safari). Also: downloads start asynchronously, so the
+  // object URL must outlive the dispatch - revoking it synchronously can
+  // cancel the download before it even begins (silent "nothing happened").
+  document.body.appendChild(hyperlink);
   hyperlink.dispatchEvent(evt);
-
-  if (!navigator.mozGetUserMedia) {
+  hyperlink.remove();
+  setTimeout(function() {
     URL.revokeObjectURL(hyperlink.href);
-  }
+  }, 2000);
 }
 
 function printLog(text, color, logclass) {

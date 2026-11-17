@@ -155,12 +155,19 @@ function saveExportWorkspace(filename) {
     objects: {},
     toolpaths: {}
   };
-  changePositionToGeoTranslate();
-  for (i = 0; i < objectsInScene.length; i++) {
-    obspace.objects[i] = objectsInScene[i].toJSON();
-  }
-  for (j = 0; j < toolpathsInScene.length; j++) {
-    obspace.toolpaths[j] = toolpathsInScene[j].toJSON();
+  try {
+    changePositionToGeoTranslate();
+    for (i = 0; i < objectsInScene.length; i++) {
+      obspace.objects[i] = objectsInScene[i].toJSON();
+    }
+    for (j = 0; j < toolpathsInScene.length; j++) {
+      obspace.toolpaths[j] = toolpathsInScene[j].toJSON();
+    }
+  } catch (err) {
+    // Never fail silently before the save dialog opens
+    console.error('Workspace export failed:', err);
+    printLog('Workspace export failed: ' + err, errorcolor, "file");
+    return;
   }
   var data = JSON.stringify(obspace, inflatedReplacer)
   var blob = new Blob([data], {
