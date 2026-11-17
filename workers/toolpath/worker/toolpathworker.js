@@ -223,7 +223,9 @@ if (typeof window == "undefined") { // Only run as worker
       // Order the paths so the head makes the shortest possible rapid moves
       // between them (instead of the arbitrary/size-based Clipper order).
       // Lead-in paths are reordered with the same permutation to stay index-matched.
-      orderPathsToMinimiseRapids(inflatedPaths, {
+      // The start seed is searched (origin + bounding-box corners) so a set
+      // stretched away from the origin is swept in one pass, not two halves.
+      orderPathsToMinimiseRapidsBestSeed(inflatedPaths, {
         X: 0,
         Y: 0
       }, {
@@ -291,7 +293,7 @@ if (typeof window == "undefined") { // Only run as worker
           entryCandidates.push(candPts);
         }
       }
-      orderPathsToMinimiseRapids(newClipperPaths, travelCursor, { entryPoints: entryCandidates });
+      orderPathsToMinimiseRapidsBestSeed(newClipperPaths, travelCursor, { entryPoints: entryCandidates });
       for (j = 0; j < newClipperPaths.length; j++) {
         if (config.offset != 0) {
           var inflatedPaths = workerGetInflatePath([newClipperPaths[j]], config.offset);
@@ -965,6 +967,26 @@ if (typeof window == "undefined") { // Only run as worker
     return total;
   }
 
+  // Total rapid-travel cost of the route AS DRAWN: the head starts at
+  // (startX, startY), rapids to each path's actual start vertex (p[0]), cuts
+  // to its end vertex (p[p.length-1]) and rapids on from there. Unlike
+  // rapidTravelCostOfOrder this re-derives nothing - it reads the vertices
+  // exactly as they will be cut, so it is the right way to compare FINISHED
+  // routes that were grown (and entry-rotated) from different seeds.
+  function rapidTravelCostOfDrawnRoute(paths, startX, startY) {
+    var total = 0;
+    var cx = startX;
+    var cy = startY;
+    for (var i = 0; i < paths.length; i++) {
+      var p = paths[i];
+      if (!p || p.length === 0) continue;
+      total += Math.sqrt(distSqXY(p[0].X, p[0].Y, cx, cy));
+      cx = p[p.length - 1].X;
+      cy = p[p.length - 1].Y;
+    }
+    return total;
+  }
+
   // Post-optimisation of a route produced by the greedy nearest-neighbour
   // pass: 2-opt (reverse a contiguous run of the route) and or-opt (relocate
   // a single path elsewhere in the route), repeated until no candidate
@@ -1118,6 +1140,124 @@ if (typeof window == "undefined") { // Only run as worker
       if (parallel[pa3] && parallel[pa3].length === n) {
         for (var i3 = 0; i3 < n; i3++) parallel[pa3][i3] = newParallel[pa3][i3];
       }
+    }
+    // keep entryPoints index-matched to the reordered paths too (same
+    // permutation as parallel) so callers / wrappers can still score the
+    // final route against the right entry candidates
+    if (entryPoints && entryPoints.length === n) {
+      var newEntry = [];
+      for (var t3 = 0; t3 < n; t3++) newEntry.push(entryPoints[order[t3]]);
+      for (var i5 = 0; i5 < n; i5++) entryPoints[i5] = newEntry[i5];
+    }
+    return paths;
+  }
+
+  // Multi-seed wrapper around orderPathsToMinimiseRapids. Seeding the greedy
+  // pass from a fixed point (the machine origin) in the middle of a stretched
+  // set of contours makes it sweep the set as two halves meeting in the
+  // middle; a seed at one end of the set sweeps it in one pass instead.
+  // So: besides the given startPos (the current behaviour, always kept as a
+  // candidate), also run the full ordering from each corner of the paths'
+  // bounding box (of the real plunge points when entry candidates are
+  // available), score every finished trial by the rapid travel it really
+  // produces (see rapidTravelCostOfDrawnRoute) and keep the best route. The
+  // winning paths - and their index-matched parallel (lead-in) and
+  // entryPoints arrays - are written back in place, so the winner carries
+  // its own parallel permutation.
+  function orderPathsToMinimiseRapidsBestSeed(paths, startPos, opts) {
+    if (!paths || paths.length < 2) return orderPathsToMinimiseRapids(paths, startPos, opts);
+    opts = opts || {};
+    var allClosed = !!opts.allClosedPolygons;
+    var parallel = opts.parallel || [];
+    var entryPoints = (opts.entryPoints && opts.entryPoints.length === paths.length) ? opts.entryPoints : null;
+    var n = paths.length;
+
+    // candidate seeds: the original start plus the four bounding-box corners
+    // (extra seeds only for reasonably sized jobs - each trial is a full
+    // greedy + 2-opt run, bounded by the same size guard as entryPoints)
+    var seeds = [{ X: startPos.X, Y: startPos.Y }];
+    if (n <= 400) {
+      var pts = [];
+      var i, j;
+      if (entryPoints) {
+        for (i = 0; i < entryPoints.length; i++) {
+          var ep = entryPoints[i];
+          if (ep) for (j = 0; j < ep.length; j++) pts.push(ep[j]);
+        }
+      }
+      if (pts.length === 0) {
+        for (i = 0; i < n; i++) {
+          var pp = paths[i];
+          if (pp) for (j = 0; j < pp.length; j++) pts.push(pp[j]);
+        }
+      }
+      if (pts.length > 0) {
+        var minX = pts[0].X, maxX = minX, minY = pts[0].Y, maxY = minY;
+        for (i = 1; i < pts.length; i++) {
+          if (pts[i].X < minX) minX = pts[i].X;
+          if (pts[i].X > maxX) maxX = pts[i].X;
+          if (pts[i].Y < minY) minY = pts[i].Y;
+          if (pts[i].Y > maxY) maxY = pts[i].Y;
+        }
+        var corners = [
+          { X: minX, Y: minY }, { X: maxX, Y: minY },
+          { X: maxX, Y: maxY }, { X: minX, Y: maxY }
+        ];
+        for (i = 0; i < corners.length; i++) {
+          var c = corners[i];
+          var dup = false;
+          for (j = 0; j < seeds.length; j++) {
+            if (seeds[j].X === c.X && seeds[j].Y === c.Y) { dup = true; break; }
+          }
+          if (!dup) seeds.push(c);
+        }
+      }
+    }
+
+    // run one trial per seed on throwaway copies (the ordering replaces path
+    // slots and permutes the outer arrays in place, so each trial needs its
+    // own outer copies; the path/lead-in/entry objects themselves are never
+    // mutated, only re-slotted, so element references can be shared)
+    var bestPaths = null, bestParallel = null, bestEntry = null, bestCost = Infinity;
+    for (var s = 0; s < seeds.length; s++) {
+      var trialPaths = paths.slice();
+      var trialParallel = [];
+      for (var tp = 0; tp < parallel.length; tp++) {
+        trialParallel.push(parallel[tp] && parallel[tp].length === n ? parallel[tp].slice() : parallel[tp]);
+      }
+      var trialEntry = entryPoints ? entryPoints.slice() : null;
+      var trialOpts = { allClosedPolygons: allClosed, parallel: trialParallel };
+      if (trialEntry) trialOpts.entryPoints = trialEntry;
+      orderPathsToMinimiseRapids(trialPaths, seeds[s], trialOpts);
+      // score the finished route by the rapid travel it really produces: the
+      // G-code leads in from the real machine position to the first path's
+      // start vertex, then hops between the polylines' end -> start vertices.
+      // rapidTravelCostOfOrder must NOT be used across trials here: it
+      // re-models entry choices that were never rotated into the paths of a
+      // trial grown from a different seed (each trial's paths are rotated
+      // along its own seed chain), so its numbers would be fiction for those
+      // trials. With rapidTravelCostOfDrawnRoute every trial's number is the
+      // actual rapid length that trial yields, and the startPos trial is
+      // scored exactly like the current behaviour - so the route can only
+      // improve, never degrade.
+      var cost = rapidTravelCostOfDrawnRoute(trialPaths, startPos.X, startPos.Y);
+      if (cost < bestCost) {
+        bestCost = cost;
+        bestPaths = trialPaths;
+        bestParallel = trialParallel;
+        bestEntry = trialEntry;
+      }
+    }
+
+    // write the winner back in place
+    for (var w = 0; w < n; w++) paths[w] = bestPaths[w];
+    for (var wp = 0; wp < parallel.length; wp++) {
+      if (parallel[wp] && parallel[wp].length === n && bestParallel[wp] !== parallel[wp]) {
+        for (var wi = 0; wi < n; wi++) parallel[wp][wi] = bestParallel[wp][wi];
+      }
+    }
+    if (entryPoints && bestEntry && bestEntry !== entryPoints) {
+      for (var we = 0; we < n; we++) entryPoints[we] = bestEntry[we];
     }
     return paths;
   }
