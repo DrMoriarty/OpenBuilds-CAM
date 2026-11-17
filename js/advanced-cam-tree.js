@@ -16,9 +16,22 @@ var moveOp = function(index, delta) {
   array.splice(indexes[0], 2, array[indexes[1]], array[indexes[0]]); //Replace from lowest index, two elements, reverting the order
 };
 
+// Full tree rebuild: Documents tree (filldoctree) + toolpaths block.
+// Rebuilds the Documents tree from scratch, so user-expanded/collapsed nodes
+// are reset to their hardcoded data-collapsed state — use fillToolpathTree()
+// instead when only the toolpaths block needs to change (e.g. addJob).
 function fillTree() {
   // $('#filetreeheader').empty();
   $('#filetree').empty();
+  filldoctree();
+  fillToolpathTree();
+}
+
+// Renders ONLY the "2. Configure Toolpaths" block: the operations table
+// (#toolpathtree), the add/delete-selection menu (#toolpathsmenu) and the
+// #generatetpgcode button state. Leaves the Documents tree (#left-tree-view)
+// untouched, so its expansion state survives — this is what addJob() calls.
+function fillToolpathTree() {
   // $('#toolpathtreeheader').empty();
   $('#toolpathtree').empty();
   $('#toolpathsmenu').empty();
@@ -29,8 +42,6 @@ function fillTree() {
   $('#toolpathsmenu').append(menuitem);
 
   clearSceneFlag = true;
-
-  filldoctree();
 
   if (toolpathsInScene.length > 0) {
 

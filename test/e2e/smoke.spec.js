@@ -357,6 +357,60 @@ test('importing an SVG file adds the drawing to the scene and the document tree'
   expect(page._consoleErrors, 'console.error output').toEqual([]);
 });
 
+// Regression: addJob() used to call fillTree() after its 800ms delay, and
+// fillTree() rebuilds the Documents tree (filldoctree) with the hardcoded
+// data-collapsed="true" on layer nodes — so a layer the user had expanded
+// collapsed again on every "Create Toolpath" click. addJob() must re-render
+// only the toolpaths block (fillToolpathTree) and leave #left-tree-view alone.
+test('Create Toolpath keeps the Documents tree expansion state', async ({ page }) => {
+  const idx = await importDrawing(page, 'import-square.dxf');
+
+  // expand the layer node the way a user does: click its toggle
+  await page.evaluate(() => {
+    window.document.querySelector('#left-tree-view li[data-collapsed="true"] .node-toggle').click();
+  });
+  const expandedBefore = await page.evaluate(() => {
+    const node = window.document.querySelector('#left-tree-view li[data-collapsed="true"]');
+    return {
+      nodeClassExpanded: node.classList.contains('expanded'),
+      vectorsVisible: window.getComputedStyle(node.querySelector('ul')).display !== 'none'
+    };
+  });
+  expect(expandedBefore.nodeClassExpanded, 'layer node expanded before Create Toolpath').toBe(true);
+  expect(expandedBefore.vectorsVisible, 'layer vectors visible before Create Toolpath').toBe(true);
+
+  // mark all vectors selected and run the Create Toolpath flow
+  await page.evaluate((i) => {
+    window.objectsInScene[i].traverse((child) => {
+      if (child.geometry) child.userData.selected = true;
+    });
+    window.addJob(-1);
+  }, idx);
+
+  // addJob re-renders the toolpaths block and opens the setup dialog after
+  // 800ms — wait for the operation <select> of toolpath 0 to appear
+  await page.locator('#toperation0').waitFor({ state: 'visible', timeout: 15000 });
+
+  const after = await page.evaluate(() => {
+    const doc = window.document;
+    const node = doc.querySelector('#left-tree-view li[data-collapsed="true"]');
+    return {
+      nodeClassExpanded: node.classList.contains('expanded'),
+      vectorsVisible: window.getComputedStyle(node.querySelector('ul')).display !== 'none',
+      toolpathRowRendered: !!doc.querySelector('#toolpathrow0'),
+      menuItems: doc.querySelectorAll('#toolpathsmenu li').length,
+      generateEnabled: !doc.querySelector('#generatetpgcode').disabled
+    };
+  });
+  expect(after.nodeClassExpanded, 'layer node stays expanded after Create Toolpath').toBe(true);
+  expect(after.vectorsVisible, 'layer vectors stay visible after Create Toolpath').toBe(true);
+  expect(after.toolpathRowRendered, 'new toolpath row rendered').toBe(true);
+  expect(after.menuItems, 'default + add-selection + delete-selection menu items').toBe(3);
+  expect(after.generateEnabled, 'Generate G-Code enabled').toBe(true);
+  expect(page._pageErrors, 'uncaught page errors').toEqual([]);
+  expect(page._consoleErrors, 'console.error output').toEqual([]);
+});
+
 test('a toolpath op configured in the dialog round-trips through the worker', async ({ page }) => {
   await createToolpathFromImport(page, 'import-square.svg');
   const tp = await page.evaluate(() => {
